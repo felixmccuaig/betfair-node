@@ -37,7 +37,6 @@ export class BetfairExchangeStream {
     private initialClk: string;
     private clk: string;
     private audCurrencyRate: CurrencyRate;
-    private streamClose: any;
 
     private lastMarketSubscription: MarketSubscriptionMessage;
 
@@ -50,12 +49,11 @@ export class BetfairExchangeStream {
     constructor(
         authToken: string,
         appKey: string,
-        segmentationEnabled: boolean,
+        segmentationEnabled: boolean, //Stream api doesn't currently support segmentation
         conflateMs: number,
         heartbeatMs: number,
         audCurrencyRate: CurrencyRate,
-        oddsUpdateCallback: any,
-        streamClose: any,
+        oddsUpdateCallback: any
     ) {
         this.audCurrencyRate = audCurrencyRate;
         this.streamDecoder = new BetfairStreamDecoder(
@@ -74,8 +72,6 @@ export class BetfairExchangeStream {
 
         this.pendingPackets = {};
 
-        this.streamClose = streamClose;
-
         this.heartbeat = new Heartbeat(this.heartAttack.bind(this));        
     }
 
@@ -93,14 +89,12 @@ export class BetfairExchangeStream {
             host: BETTING_URLS.stream, port: 443
         }, this.onStreamConnected.bind(this));
 
-
         this.readline = createInterface({
             input: this.tlsSocket,
         });
 
         this.readline.on("line", this.onStreamData.bind(this));
         this.readline.on("close", this.onStreamClose.bind(this));
-        //TODO: add error case
         this.authenticationStatus = false;
     }
 

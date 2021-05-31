@@ -1,11 +1,10 @@
 import querystring from "query-string";
 import axios from "axios";
 
-import { MarketFilter, MarketSort, PlaceInstruction } from "./BetfairApiTypes";
+import { BetStatus, MarketFilter, MarketSort, OrderProjection, PlaceInstruction, SortDir } from "./BetfairApiTypes";
 import { BetfairExchangeStream } from "./BetfairExchangeStreamApi";
-import { CurrencyRate, MarketCache } from "./BetfairExchangeStreamApiTypes";
-
-import { catBetfairApi } from "./Logging";
+import { CurrencyRate, MarketChangeCallback } from "./BetfairExchangeStreamApiTypes";
+import { generatePacketID } from "./Utils";
 
 const AUTH_URLS = {
     interactiveLogin: 'https://identitysso.betfair.com.au:443/api/login',
@@ -24,41 +23,34 @@ const ACCOUNT_URLS = {
 
 export class BetfairApi {
     public betfairExchangeStreamApi: BetfairExchangeStream;
-    private locale: string;
-    private sessionKey: string;
+    private locale: string; //Our target language
+    private sessionKey: string; //This is required to authenticate your requests
     private appKey: string;
-    private currencyRates: CurrencyRate[];
+    private currencyRates: CurrencyRate[]; 
+    private targetCurrency: string;
+    private conflateMS: number;
+    private heartbeatMS: number;
+    private marketChangeCallback: MarketChangeCallback;
 
-    public setLocale(locale: string) {
+    constructor(
+        locale: string, 
+        currencyCode: string, 
+        conflateMS: number, 
+        heartbeatMS: number,
+        marketChangeCallback: MarketChangeCallback
+    ) {
         this.locale = locale;
-        //TODO: CHECK THAT exchangestream has the right locale
+        this.targetCurrency = currencyCode;
+        this.conflateMS = conflateMS;
+        this.heartbeatMS = heartbeatMS;
+        this.marketChangeCallback = marketChangeCallback;
     }
 
-    public getCache() {
+    /*
+    *   Return a dictionary of marketIds which the stream is subscribed to
+    */
+    public getStreamCache() {
         return this.betfairExchangeStreamApi.getCache();
-    }
-
-    private loginInteractive(username: string, password: string) {
-        let formData = querystring.stringify({
-            username: username,
-            password: password,
-            login: true,
-            redirectMethod: 'POST',
-            product: 'home.betfair.int',
-            url: 'https://www.betfair.com/'
-        });
-    
-        return axios({
-            method: 'post',
-            url: AUTH_URLS.interactiveLogin,
-            headers: {
-                "accept": "application/json",
-                "content-type": "application/x-www-form-urlencoded",
-                'content-length': formData.length,
-                'x-application': 'BetfairAPI'
-            },
-            data: formData
-        });
     }
     
     private performLogin(appKey: string, username: string, password: string) {
@@ -84,32 +76,32 @@ export class BetfairApi {
         });
     }
     
+    /*
+    *   Create an exchangeStream instance, this can be used
+    *   to keep track of odds in real time
+    */
     public createStream(currencyCode: string) {
-        var audCurrencyRate = this.currencyRates.filter(x => x.currencyCode === currencyCode)[0];
-        if(!audCurrencyRate) {
-            throw "audCurrencyRate should exist!";
+        var targetCurrency = this.currencyRates.filter(x => x.currencyCode === currencyCode)[0];
+        if(!targetCurrency) {
+            throw `Can't find the currency rate for ${currencyCode}!`;
         }
         this.betfairExchangeStreamApi = new BetfairExchangeStream(
             this.sessionKey,
             this.appKey,
             false,
-            0,
-            500,
-            audCurrencyRate,
-            this.oddsUpdate.bind(this),
-            null //UNUSED
+            this.conflateMS,
+            this.heartbeatMS,
+            targetCurrency,
+            this.marketChangeCallback,
         );
     }
 
-    private oddsUpdate( marketCache: { [key: string]: MarketCache }, deltas: string[]) {
-        deltas.forEach(x => {
-            catBetfairApi.silly(`Calling oddsupdate on delta ${x}`);
-        });
-    }
-
+    /*
+    *   Login using a username, password and appKey (UNSAFE), note the 
+    *   best way to login for a bot is using certificate login
+    */
     async login(appKey: string, username: string, password: string) {
         var authCredentials = await this.performLogin(appKey, username, password);
-
         if(authCredentials.data.status === "SUCCESS") {
             this.appKey = appKey;
             this.sessionKey = authCredentials.data.token;
@@ -121,8 +113,6 @@ export class BetfairApi {
             throw "Error, listing currency rates";
         }
         this.currencyRates = currencyRes.data.result;
-
-        this.createStream("AUD");
     }
     
     logout(sessionKey: string) {
@@ -164,18 +154,18 @@ export class BetfairApi {
     }
     
     devApiFilter(method: string, filter: MarketFilter) {
-        return this.devApi(method, {
+        return this.bettingApi(method, {
             "filter": filter,
             "locale": this.locale
         }, this.sessionKey, this.appKey);
     }
     
-    devApi(method: string, params: any, sessionKey: string, appKey: string) {
+    bettingApi(method: string, params: any, sessionKey: string, appKey: string) {
         var def = {
             "jsonrpc": "2.0",
             "method": "SportsAPING/v1.0/" + method,
             "params": params,
-            "id": 1
+            "id": generatePacketID()
         };
         return this.makeRequest(BETTING_URLS.exchange, JSON.stringify(def), sessionKey, appKey);
     }
@@ -185,7 +175,7 @@ export class BetfairApi {
             "jsonrpc": "2.0",
             "method": "AccountAPING/v1.0/" + method,
             "params": params,
-            "id": 1
+            "id": generatePacketID()
         };
         return this.makeRequest(ACCOUNT_URLS.accounts, JSON.stringify(def), sessionKey, appKey);
     }
@@ -206,8 +196,13 @@ export class BetfairApi {
         });
     }
     
-    listMarketCatalogue(filter: MarketFilter, marketProjection: any[], sort: MarketSort, maxResults: number) {
-        return this.devApi("listMarketCatalogue", {
+    listMarketCatalogue(
+        filter: MarketFilter, 
+        marketProjection: any[], 
+        sort: MarketSort, 
+        maxResults: number
+    ) {
+        return this.bettingApi("listMarketCatalogue", {
             "filter": filter,
             "marketProjection": marketProjection,
             "sort": sort,
@@ -217,7 +212,7 @@ export class BetfairApi {
     }
     
     listMarketBook(params: any) {
-        return this.devApi("listMarketBook", params, this.sessionKey, this.appKey);
+        return this.bettingApi("listMarketBook", params, this.sessionKey, this.appKey);
     }
 
     listEventTypes(filter: MarketFilter) {
@@ -248,15 +243,48 @@ export class BetfairApi {
         return this.devApiFilter("listVenues", filter);
     }
 
-    listMarketProfitAndLoss() {
+    listMarketProfitAndLoss(
+        marketIds: string[], 
+        includeSettledBets: boolean, 
+        includeBspBets: boolean, 
+        netOfCommission: boolean
+    ) {
+        return this.bettingApi("listMarketProfitAndLoss", {
+            marketIds: marketIds,
+            includeSettledBets: includeSettledBets,
+            includeBspBets: includeBspBets,
+            netOfCommission: netOfCommission,
+            "locale": this.locale
+        }, this.sessionKey, this.appKey);
+    }
+
+    listCurrentOrders(
+        betIds: string[], 
+        marketIds: string[], 
+        orderProjection: OrderProjection, 
+        placed: any, 
+        orderBy: any, 
+        sortDir: SortDir, 
+        fromRecord: number, 
+        recordCount: number
+    ) {
 
     }
 
-    listCurrentOrders() {
-
-    }
-
-    listClearedOrders() {
+    listClearedOrders(
+        betStatus: BetStatus, 
+        eventTypeIds: string[], 
+        eventIds: string[], 
+        marketIds: string[], 
+        runnerIds: number[], 
+        betIds: any[], 
+        side: any, 
+        settledDateRange: any, 
+        groupBy: any, 
+        includeItemDescription: any, 
+        fromRecord: number, 
+        recordCount: number
+    ) {
 
     }
 
@@ -268,7 +296,7 @@ export class BetfairApi {
         customerStrategyRef: string, 
         async: boolean
     ) {
-        return this.devApi("placeOrders", {
+        return this.bettingApi("placeOrders", {
             "marketId": marketId,
             "instructions": instructions,
             "customerRef": customerRef,

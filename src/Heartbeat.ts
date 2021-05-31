@@ -22,7 +22,7 @@ export class Heartbeat {
         if(this.beating) {
             catHeartbeat.debug(`Heart stopping!`);
             clearTimeout(this.heartAttackTimeout);
-            this.heartAttackTimeout = undefined;
+            //this.heartAttackTimeout = undefined;
             this.beating = false;
         }
     }

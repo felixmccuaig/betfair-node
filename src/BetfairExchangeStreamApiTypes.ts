@@ -1,3 +1,6 @@
+
+export type MarketChangeCallback = (marketCache: { [key: string]: MarketCache }, deltas: string[]) => void;
+
 export type Message = {
     id: number,
     op: string,

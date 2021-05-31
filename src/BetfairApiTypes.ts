@@ -16,6 +16,18 @@ export type MarketFilter = {
     raceTypes?: string[]
 };
 
+export enum SortDir {
+    EARLIEST_TO_LATEST = "EARLIEST_TO_LATEST",
+    LATEST_TO_EARLIEST = "LATEST_TO_EARLIEST"
+}
+
+export enum BetStatus {
+    SETTLED = "SETTLED",
+    VOIDED = "VOIDED",
+    LAPSED = "LAPSED",
+    CANCELLED = "CANCELLED"
+}
+
 export type OrderSubscription = {
     
 };
