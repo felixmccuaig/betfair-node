@@ -4,7 +4,8 @@
   "description": "A nodejs package for the Betfair JSON-RPC api with Exchange Stream Api support.",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "example": "ts-node example/example.ts"
   },
   "keywords": [
     "Betfair",
