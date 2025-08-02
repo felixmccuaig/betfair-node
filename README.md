@@ -301,6 +301,16 @@ Professional real-time trading interface showing live price ladders, similar to 
 - Best back/lay prices and volumes
 - Clean, professional display
 
+### 📹 Market Recorder (`npm run example:recorder`)
+Comprehensive market data recording system that captures both raw TLS transmissions and structured market summaries. Features:
+- **Dual Recording**: Raw TLS stream data + structured market summaries
+- **Production Ready**: 30-second heartbeat, graceful error handling
+- **Market-Specific Files**: Individual files per market for organized storage
+- **Complete Lifecycle**: Records from market open through settlement
+
+### 📹 Simple Market Recorder (`npm run example:recorder-simple`)
+Streamlined 30-second recording example perfect for testing and quick data capture.
+
 ### Usage
 ```bash
 # List greyhound markets
