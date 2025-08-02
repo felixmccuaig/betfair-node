@@ -253,6 +253,12 @@ const processRunnerChanges = (
       deltas.push(`BSP lay prices updated for runner ${selectionId}`);
     }
 
+    // Trading data
+    if (runnerChange.trd) {
+      runner = { ...runner, trd: runnerChange.trd };
+      deltas.push(`Trading data updated for runner ${selectionId}: ${runnerChange.trd.length} trades`);
+    }
+
     updatedRunners[selectionId] = runner;
   }
 
@@ -297,6 +303,8 @@ const createEmptyRunnerCache = (id: number): RunnerCache => ({
   spf: 0,
   spb: [],
   spl: [],
+  // Trading data
+  trd: [],
   fullImage: {},
 });
 

@@ -6,7 +6,8 @@ import {
   StreamRunnerStatus, 
   StreamMarketStatus,
   MarketChangeCallback,
-  RawDataCallback 
+  RawDataCallback,
+  MarketDefinition
 } from './betfair-exchange-stream-api-types';
 
 // Types for market recording
@@ -36,6 +37,15 @@ export interface BasicMarketRecord {
   recordedAt: string;
   finalTotalMatched?: number;
   winners?: number[];
+  // Reconciliation fields
+  reconciled?: boolean; // True when volumes calculated from trading data
+  reconciliationTime?: string; // When reconciliation happened
+  calculatedTotalTurnover?: number; // Sum of all runner turnovers
+  liquidityProfile?: {
+    totalUniquePrice: number; // Number of different prices traded across all runners
+    averageSpread?: number; // Average bid-ask spread
+    marketDepth: number; // Total volume available
+  };
 }
 
 export interface BasicRunnerRecord {
@@ -47,11 +57,21 @@ export interface BasicRunnerRecord {
   totalMatched: number;
   bsp?: number; // Betfair Starting Price
   ltp: number; // Last Traded Price
-  tv: number; // Total Volume
+  tv: number; // Total Volume (calculated from trading data when reconciled)
   spn?: number; // Starting Price Near
   spf?: number; // Starting Price Far
   finalStatus?: StreamRunnerStatus;
   isWinner: boolean;
+  // Reconciliation fields
+  reconciledVolume?: number; // Calculated from trd array
+  totalTurnover?: number; // Sum of price * volume
+  volumeWeightedPrice?: number; // Average price weighted by volume
+  priceRange?: {
+    highest: number;
+    lowest: number;
+    trades: number; // Number of different prices traded
+  };
+  tradingActivity?: [number, number][]; // [price, volume] pairs (top 10 by volume)
 }
 
 export interface MarketRecorderState {
@@ -184,6 +204,130 @@ export const recordRawTransmission = (
 };
 
 /**
+ * Calculates reconciled trading data from runner cache
+ */
+const calculateRunnerTradingData = (runnerCache: RunnerCache): {
+  reconciledVolume: number;
+  totalTurnover: number;
+  volumeWeightedPrice: number;
+  priceRange?: {
+    highest: number;
+    lowest: number;
+    trades: number;
+  };
+  tradingActivity: [number, number][];
+} => {
+  const trd = runnerCache.trd || [];
+  
+  if (trd.length === 0) {
+    return {
+      reconciledVolume: 0,
+      totalTurnover: 0,
+      volumeWeightedPrice: 0,
+      tradingActivity: []
+    };
+  }
+
+  // Filter out zero volume trades and calculate totals
+  const activeTrades = trd.filter(([price, volume]: [number, number]) => volume > 0);
+  
+  const reconciledVolume = activeTrades.reduce((sum: number, [, volume]: [number, number]) => sum + volume, 0);
+  const totalTurnover = activeTrades.reduce((sum: number, [price, volume]: [number, number]) => sum + (price * volume), 0);
+  const volumeWeightedPrice = reconciledVolume > 0 ? totalTurnover / reconciledVolume : 0;
+
+  // Calculate price range
+  let priceRange: { highest: number; lowest: number; trades: number } | undefined;
+  if (activeTrades.length > 0) {
+    const prices = activeTrades.map(([price]: [number, number]) => price);
+    priceRange = {
+      highest: Math.max(...prices),
+      lowest: Math.min(...prices),
+      trades: activeTrades.length
+    };
+  }
+
+  // Get top 10 trading activities by volume
+  const tradingActivity = activeTrades
+    .sort(([, a]: [number, number], [, b]: [number, number]) => b - a) // Sort by volume desc
+    .slice(0, 10); // Top 10
+
+  return {
+    reconciledVolume,
+    totalTurnover,
+    volumeWeightedPrice,
+    priceRange,
+    tradingActivity
+  };
+};
+
+/**
+ * Reconciles a runner's trading data when market completes
+ */
+const reconcileRunnerData = (
+  basicRunner: BasicRunnerRecord,
+  runnerCache: RunnerCache,
+  isMarketComplete: boolean
+): BasicRunnerRecord => {
+  // Only reconcile when market is complete and has trading data
+  if (!isMarketComplete || !runnerCache.trd || runnerCache.trd.length === 0) {
+    return basicRunner;
+  }
+
+  const tradingData = calculateRunnerTradingData(runnerCache);
+
+  return {
+    ...basicRunner,
+    // Update tv with calculated volume instead of Betfair's (often 0)
+    tv: tradingData.reconciledVolume,
+    // Add reconciliation data
+    reconciledVolume: tradingData.reconciledVolume,
+    totalTurnover: tradingData.totalTurnover,
+    volumeWeightedPrice: tradingData.volumeWeightedPrice,
+    priceRange: tradingData.priceRange,
+    tradingActivity: tradingData.tradingActivity
+  };
+};
+
+/**
+ * Determines if a market is truly complete based on status and runner states
+ * Fixes issue where Betfair's 'complete' flag is unreliable
+ */
+const isMarketTrulyComplete = (
+  marketDef: MarketDefinition, 
+  runners: BasicRunnerRecord[]
+): boolean => {
+  // Market is definitely complete if closed
+  if (marketDef.status === StreamMarketStatus.CLOSED) {
+    return true;
+  }
+  
+  // Market is NOT complete if still open or inactive
+  if (marketDef.status === StreamMarketStatus.OPEN || 
+      marketDef.status === StreamMarketStatus.INACTIVE) {
+    return false;
+  }
+  
+  // For suspended markets, check if all runners have final status
+  if (marketDef.status === StreamMarketStatus.SUSPENDED) {
+    const finalStatuses = [
+      StreamRunnerStatus.WINNER,
+      StreamRunnerStatus.LOSER, 
+      StreamRunnerStatus.PLACED,
+      StreamRunnerStatus.REMOVED_VACANT,
+      StreamRunnerStatus.REMOVED
+    ];
+    
+    const allRunnersHaveFinalStatus = runners.every(runner => 
+      finalStatuses.includes(runner.status)
+    );
+    
+    return allRunnersHaveFinalStatus;
+  }
+  
+  return false;
+};
+
+/**
  * Updates basic market record from market cache
  */
 export const updateBasicRecord = (
@@ -200,12 +344,16 @@ export const updateBasicRecord = (
   // Create or update basic record
   const existingRecord = state.basicRecords.get(marketId);
   
+  // Determine if market is truly complete first
+  const isComplete = isMarketTrulyComplete(marketDef, []);
+
   const runners: BasicRunnerRecord[] = Object.values(marketCache.runners).map(runner => {
     // Try to find runner name from market definition
     const runnerDef = marketDef.runners.find(r => r.id === runner.id);
     const runnerName = runnerDef ? getRunnerName(runnerDef) : `Runner ${runner.id}`;
 
-    return {
+    // Create basic runner record
+    let basicRunner: BasicRunnerRecord = {
       id: runner.id,
       name: runnerName,
       status: runner.status,
@@ -214,13 +362,44 @@ export const updateBasicRecord = (
       totalMatched: runner.totalMatched,
       bsp: runnerDef?.bsp,
       ltp: runner.ltp,
-      tv: runner.tv,
+      tv: runner.tv, // Will be updated by reconciliation if market complete
       spn: runner.spn,
       spf: runner.spf,
       finalStatus: runner.status,
       isWinner: runner.status === StreamRunnerStatus.WINNER,
     };
+
+    // Apply reconciliation if market is complete
+    basicRunner = reconcileRunnerData(basicRunner, runner, isComplete);
+
+    return basicRunner;
   });
+
+  // Calculate market-level reconciliation data
+  let reconciliationData: Partial<BasicMarketRecord> = {};
+  if (isComplete) {
+    const calculatedTotalTurnover = runners.reduce((sum, runner) => 
+      sum + (runner.totalTurnover || 0), 0
+    );
+    
+    const totalUniquePrice = runners.reduce((sum, runner) => 
+      sum + (runner.priceRange?.trades || 0), 0
+    );
+
+    const marketDepth = runners.reduce((sum, runner) => 
+      sum + (runner.reconciledVolume || runner.tv), 0
+    );
+
+    reconciliationData = {
+      reconciled: true,
+      reconciliationTime: new Date().toISOString(),
+      calculatedTotalTurnover,
+      liquidityProfile: {
+        totalUniquePrice,
+        marketDepth
+      }
+    };
+  }
 
   const basicRecord: BasicMarketRecord = {
     marketId,
@@ -232,24 +411,33 @@ export const updateBasicRecord = (
     totalMatched: marketDef.totalMatched,
     inPlay: marketDef.inPlay,
     bspReconciled: marketDef.bspReconciled,
-    complete: marketDef.complete,
+    complete: isComplete, // Use our corrected logic
     numberOfWinners: marketDef.numberOfWinners,
     runners,
     recordedAt: new Date().toISOString(),
-    finalTotalMatched: marketDef.complete ? marketDef.totalMatched : undefined,
+    finalTotalMatched: isComplete ? marketDef.totalMatched : undefined,
     winners: runners.filter(r => r.isWinner).map(r => r.id),
+    ...reconciliationData // Add reconciliation data if market complete
   };
 
   state.basicRecords.set(marketId, basicRecord);
-
+  
   // If market is complete, save the record immediately and track completion
-  if (marketDef.complete || marketDef.status === StreamMarketStatus.CLOSED) {
+  if (isComplete) {
     saveBasicRecord(state.config, basicRecord);
     
     // Mark market as completed
     if (!state.completedMarkets.has(marketId)) {
       state.completedMarkets.add(marketId);
-      console.log(`🏁 Market ${marketDef.name || marketId} completed and recorded`);
+      
+      // Log completion with reconciliation info
+      const totalTurnover = basicRecord.calculatedTotalTurnover;
+      const marketDepth = basicRecord.liquidityProfile?.marketDepth;
+      const reconciliationMsg = totalTurnover && marketDepth 
+        ? ` (reconciled: £${totalTurnover.toFixed(2)} turnover, ${marketDepth.toFixed(0)} volume)`
+        : '';
+      
+      console.log(`🏁 Market ${marketDef.name || marketId} completed and recorded${reconciliationMsg}`);
       
       // Check if all finite markets are complete
       checkAllMarketsComplete(state);

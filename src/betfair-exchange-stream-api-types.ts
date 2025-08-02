@@ -165,6 +165,8 @@ export type RunnerCache = {
   spf: number; // Starting price far
   spb: [number, number][]; // Starting price back [price, size] array
   spl: [number, number][]; // Starting price lay [price, size] array
+  // Trading data
+  trd: [number, number][]; // Traded [price, volume] array
   fullImage: { [key: string]: RunnerChange };
 };
 
