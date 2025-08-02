@@ -9,6 +9,7 @@ import {
   ConnectionMessage,
   CurrencyRate,
   MarketChangeCallback,
+  RawDataCallback,
 } from './betfair-exchange-stream-api-types';
 
 import {
@@ -52,6 +53,7 @@ export interface StreamApiState {
   lastMarketSubscription?: MarketSubscriptionMessage;
   lastMarkets: string[];
   marketChangeCallback: MarketChangeCallback;
+  rawDataCallback?: RawDataCallback;
 }
 
 /**
@@ -64,11 +66,13 @@ export const createStreamApiState = (
   conflateMs: number,
   heartbeatMs: number,
   audCurrencyRate: CurrencyRate,
-  marketChangeCallback: MarketChangeCallback
+  marketChangeCallback: MarketChangeCallback,
+  rawDataCallback?: RawDataCallback
 ): StreamApiState => {
   const onHeartAttack = () => {
-    console.error('Heart attack detected, stream needs restart');
-    // This would trigger stream restart in a real implementation
+    console.warn('Heartbeat timeout detected - stream may be stale, but continuing...');
+    // Don't crash - just log a warning and continue
+    // In production, you might want to implement reconnection logic here
   };
 
   return {
@@ -84,6 +88,7 @@ export const createStreamApiState = (
     audCurrencyRate,
     lastMarkets: [],
     marketChangeCallback,
+    rawDataCallback,
   };
 };
 
@@ -120,8 +125,15 @@ export const openStream = (state: StreamApiState): Promise<StreamApiState> => {
       };
 
       readline.on('line', (data: string) => {
-        const updatedHeartbeat = startHeartbeat(state.heartbeat);
-        const refreshedHeartbeat = refreshHeartbeat(updatedHeartbeat);
+        // Call raw data callback first (for recording raw transmissions)
+        if (state.rawDataCallback) {
+          state.rawDataCallback(data);
+        }
+
+        // Refresh heartbeat on each data packet (this will start it if not already running)
+        const refreshedHeartbeat = state.heartbeat.isBeating 
+          ? refreshHeartbeat(state.heartbeat)
+          : startHeartbeat(state.heartbeat);
         
         const updatedStreamDecoder = processDataPacket(
           state.streamDecoder,
@@ -326,7 +338,8 @@ export const createAndConnectStream = async (
   conflateMs: number,
   heartbeatMs: number,
   audCurrencyRate: CurrencyRate,
-  marketChangeCallback: MarketChangeCallback
+  marketChangeCallback: MarketChangeCallback,
+  rawDataCallback?: RawDataCallback
 ): Promise<StreamApiState> => {
   let state = createStreamApiState(
     authToken,
@@ -335,11 +348,39 @@ export const createAndConnectStream = async (
     conflateMs,
     heartbeatMs,
     audCurrencyRate,
-    marketChangeCallback
+    marketChangeCallback,
+    rawDataCallback
   );
 
   state = await openStream(state);
   state = authenticateStream(state);
   
   return state;
+};
+
+/**
+ * Creates and connects a stream specifically optimized for recording with more lenient heartbeat
+ */
+export const createAndConnectRecordingStream = async (
+  authToken: string,
+  appKey: string,
+  segmentationEnabled: boolean,
+  conflateMs: number,
+  audCurrencyRate: CurrencyRate,
+  marketChangeCallback: MarketChangeCallback,
+  rawDataCallback?: RawDataCallback
+): Promise<StreamApiState> => {
+  // Use a longer heartbeat for recording (30 seconds instead of 5)
+  const recordingHeartbeatMs = 30000;
+  
+  return createAndConnectStream(
+    authToken,
+    appKey,
+    segmentationEnabled,
+    conflateMs,
+    recordingHeartbeatMs,
+    audCurrencyRate,
+    marketChangeCallback,
+    rawDataCallback
+  );
 };

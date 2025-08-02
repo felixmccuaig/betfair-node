@@ -67,24 +67,18 @@ export const stopHeartbeat = (state: HeartbeatState): HeartbeatState => {
 };
 
 /**
- * Refreshes the heartbeat timer
+ * Refreshes the heartbeat timer by stopping and restarting it
  * @param state - Current heartbeat state
  * @returns Updated heartbeat state
  */
 export const refreshHeartbeat = (state: HeartbeatState): HeartbeatState => {
   if (!state.isBeating) {
-    console.warn('Heart is not beating!');
-    return state;
+    return state; // Don't warn - just return if not beating
   }
 
-  // Heartbeat refresh
-
-  if (state.timeout) {
-    // Refresh the existing timeout
-    state.timeout.refresh();
-  }
-
-  return state;
+  // Stop and restart for a more reliable refresh
+  const stoppedState = stopHeartbeat(state);
+  return startHeartbeat(stoppedState);
 };
 
 /**

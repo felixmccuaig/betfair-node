@@ -5,6 +5,7 @@ export * from './betfair-api';
 export * from './betfair-exchange-stream-api';
 export * from './betfair-stream-decoder';
 export * from './heartbeat';
+export * from './market-recorder';
 export * from './utils';
 
 // Type exports

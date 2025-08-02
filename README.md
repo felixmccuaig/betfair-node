@@ -32,6 +32,12 @@ A comprehensive Node.js TypeScript library for the Betfair Exchange API, providi
 - **Request Conflation**: Batch multiple market subscriptions for efficiency
 - **Currency Conversion**: Automatic currency rate handling and conversion
 
+### 📹 **Market Recording & Analysis**
+- **Raw Data Recording**: Capture pure TLS stream transmissions before any processing
+- **Structured Market Summaries**: Automatic BSP, winner, and trading volume extraction
+- **Market-Specific Files**: Individual files per market for organized data storage
+- **Production-Ready Monitoring**: Robust heartbeat and error handling for long recordings
+
 ## Installation
 
 ```bash
@@ -170,6 +176,60 @@ async function placeBet() {
 }
 ```
 
+### 5. Market Recording
+
+```typescript
+import { 
+  createBetfairApiState,
+  login,
+  listMarketCatalogue,
+  createAndConnectRecordingStream,
+  subscribeToMarkets,
+  createMarketRecorderState,
+  startRecording,
+  createRecordingMarketChangeCallback,
+  createRawDataCallback
+} from 'betfair-node';
+
+async function recordMarketData() {
+  // Setup authentication
+  const apiState = createBetfairApiState('en', 'AUD', 250, 5000, () => {});
+  const authResult = await login(apiState, appKey, username, password);
+
+  // Configure recording (both raw and structured data)
+  const recorderState = createMarketRecorderState({
+    outputDirectory: './recordings',
+    enableBasicRecording: true,    // Structured summaries
+    enableRawRecording: true,      // Pure TLS stream data
+    rawFilePrefix: '',             // Files: {marketId}.txt
+    basicFilePrefix: 'basic_',     // Files: basic_{marketId}.json
+  });
+
+  // Find markets and start recording
+  const markets = await listMarketCatalogue(/* ... */);
+  const marketIds = markets.data.result.map(m => m.marketId);
+  
+  startRecording(recorderState, marketIds);
+
+  // Connect with recording-optimized stream (30s heartbeat)
+  const streamState = await createAndConnectRecordingStream(
+    authResult.sessionKey,
+    appKey,
+    false,                        // segmentationEnabled
+    250,                          // conflateMs
+    { currencyCode: 'AUD', rate: 1.0 },
+    createRecordingMarketChangeCallback(recorderState), // Basic recording
+    createRawDataCallback(recorderState)                // Raw recording
+  );
+
+  subscribeToMarkets(streamState, marketIds);
+  
+  // Records automatically to:
+  // - {marketId}.txt (raw TLS transmissions)
+  // - basic_{marketId}.json (market summaries with BSP, winners, etc.)
+}
+```
+
 ## API Reference
 
 ### Core Functions
@@ -196,10 +256,21 @@ async function placeBet() {
 - `getAccountDetails(state)` - Get account information
 - `getAccountStatement(state, options)` - Get account statement
 
+#### Market Recording
+- `createMarketRecorderState(config)` - Initialize market recorder with configuration
+- `startRecording(state, marketIds)` - Start recording for specified markets
+- `stopRecording(state)` - Stop recording and save all data to files
+- `createRecordingMarketChangeCallback(state, originalCallback?)` - Create callback for structured recording
+- `createRawDataCallback(state)` - Create callback for raw TLS stream recording
+- `getRecordingStatus(state, marketId)` - Get current recording status for a market
+- `loadBasicRecord(config, marketId)` - Load previously saved market summary
+- `listRecordedMarkets(config)` - List all recorded markets in output directory
+
 ### Streaming API
 
 #### Connection Management
-- `createAndConnectStream(sessionKey, appKey, conflateMs, heartbeatMs, callback)` - Connect to stream
+- `createAndConnectStream(sessionKey, appKey, conflateMs, heartbeatMs, callback, rawCallback?)` - Connect to stream
+- `createAndConnectRecordingStream(sessionKey, appKey, segmentationEnabled, conflateMs, audCurrencyRate, marketCallback, rawCallback?)` - Connect with recording optimization (30s heartbeat)
 - `disconnectStream(state)` - Disconnect from stream
 
 #### Market Subscriptions

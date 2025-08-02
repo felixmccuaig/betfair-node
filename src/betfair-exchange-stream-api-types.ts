@@ -3,6 +3,8 @@ export type MarketChangeCallback = (
   deltas: string[]
 ) => void;
 
+export type RawDataCallback = (rawData: string) => void;
+
 export type Message = {
   id: number;
   op: string;
