@@ -1,7 +1,7 @@
 {
   "name": "betfair-node",
   "version": "1.0.0",
-  "description": "A nodejs package for the Betfair JSON-RPC api with Exchange Stream Api support.",
+  "description": "A comprehensive Node.js TypeScript library for the Betfair Exchange API, providing both JSON-RPC API integration and real-time Exchange Stream API support for automated betting and trading applications.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "files": [
@@ -25,17 +25,39 @@
     "clean": "rimraf dist coverage"
   },
   "keywords": [
-    "Betfair",
-    "Exchange",
-    "Stream",
-    "Betting",
-    "NodeJS",
-    "Automated",
-    "Trading",
-    "Horse"
+    "betfair",
+    "betfair-api", 
+    "exchange-stream",
+    "betting",
+    "trading",
+    "gambling",
+    "sports-betting",
+    "horse-racing",
+    "greyhound-racing",
+    "automated-trading",
+    "typescript",
+    "nodejs",
+    "json-rpc",
+    "websocket",
+    "real-time",
+    "market-data"
   ],
-  "author": "Felix McCuaig",
+  "author": {
+    "name": "Felix McCuaig",
+    "email": "felixmccuaig@gmail.com"
+  },
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/felixmccuaig/betfair-node.git"
+  },
+  "homepage": "https://github.com/felixmccuaig/betfair-node#readme",
+  "bugs": {
+    "url": "https://github.com/felixmccuaig/betfair-node/issues"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  },
   "dependencies": {
     "axios": "^1.6.2",
     "dotenv": "^17.2.1",
