@@ -13,6 +13,8 @@ The Market Recorder functionality allows you to record Betfair market data in tw
 - **Flexible Configuration**: Enable/disable recording types independently
 - **Production Ready**: Handles errors gracefully and ensures no data loss
 - **Robust Heartbeat**: Optimized heartbeat monitoring for long-running recordings without crashes
+- **Intelligent Completion**: Automatically stops when all markets complete (finite mode) or runs forever (perpetual mode)
+- **Dynamic Market Discovery**: Add new markets to existing recording sessions without interruption
 
 ## How Market Recorder Works
 
@@ -33,31 +35,31 @@ The Market Recorder operates at two levels of the Betfair Exchange Stream API:
                   ▼
 ┌─────────────────────────────────────────────────┐
 │           📝 RAW RECORDING LAYER                │
-│     (Captures before any processing)           │
+│     (Captures before any processing)            │
 │                                                 │
-│  • Intercepts at readline.on('line')           │
-│  • Routes to market-specific files             │
-│  • Pure string capture: {marketId}.txt        │
+│  • Intercepts at readline.on('line')            │
+│  • Routes to market-specific files              │
+│  • Pure string capture: {marketId}.txt          │
 └─────────────────┬───────────────────────────────┘
                   │ Same Raw JSON Strings
                   ▼
 ┌─────────────────────────────────────────────────┐
 │        🧠 STREAM DECODER & PROCESSOR            │
 │                                                 │
-│  • JSON.parse() and deserialization           │
-│  • Market cache updates                       │
-│  • Runner state tracking                      │
+│  • JSON.parse() and deserialization             │
+│  • Market cache updates                         │
+│  • Runner state tracking                        │
 └─────────────────┬───────────────────────────────┘
                   │ Processed Market Objects
                   ▼
 ┌─────────────────────────────────────────────────┐
 │         📊 BASIC RECORDING LAYER                │
-│     (Structured market summaries)              │
+│     (Structured market summaries)               │
 │                                                 │
-│  • Market completion detection                 │
-│  • BSP extraction                             │
-│  • Winner identification                      │
-│  • Saves: basic_{marketId}.json              │
+│  • Market completion detection                  │
+│  • BSP extraction                               │
+│  • Winner identification                        │
+│  • Saves: basic_{marketId}.json                 │
 └─────────────────────────────────────────────────┘
 ```
 
@@ -270,6 +272,8 @@ const callback = createRecordingMarketChangeCallback(recorderState);
 | `enableRawRecording` | boolean | Enable raw transmission recording |
 | `rawFilePrefix` | string? | Prefix for raw recording files (default: "") |
 | `basicFilePrefix` | string? | Prefix for basic recording files (default: "basic_") |
+| `recordingMode` | 'finite' \| 'perpetual'? | Recording mode: finite stops when all markets complete, perpetual runs forever (default: "finite") |
+| `onAllMarketsComplete` | () => void? | Callback triggered when all finite markets are complete |
 
 ## File Output Formats
 
@@ -408,20 +412,60 @@ console.log('Basic records:', basicRecords);
 console.log('Raw records:', rawRecords);
 ```
 
-## Complete Example
+### `getRecordingCompletionStatus(state)`
+Gets completion status for all markets being recorded.
 
-See `market-recorder-example.ts` for a complete working example that:
+```typescript
+const status = getRecordingCompletionStatus(recorderState);
+console.log(`Progress: ${status.completedMarkets}/${status.totalMarkets} markets completed`);
+console.log('Pending markets:', status.pendingMarkets);
+console.log('All complete:', status.isAllComplete);
+console.log('Recording mode:', status.recordingMode);
+```
+
+### `addMarketsToRecording(state, marketIds)`
+Adds new markets to an existing recording session.
+
+```typescript
+// Add newly discovered markets without stopping current recording
+recorderState = addMarketsToRecording(recorderState, ['1.111', '1.222']);
+```
+
+## Complete Examples
+
+### Finite Recording (`market-recorder-example.ts`)
+Records specific markets until they all complete, then stops automatically:
 
 1. Authenticates with Betfair
-2. Finds markets to record
-3. Sets up recording configuration
+2. Finds 3 horse racing markets
+3. Sets up finite recording mode
 4. Connects to the stream
-5. Records market data for a specified duration
-6. Saves all recordings to files
+5. Records until all markets complete
+6. Exits automatically when done
 
-Run with:
 ```bash
 npm run example:recorder
+```
+
+### Simple Recording (`simple-market-recorder.ts`)
+Quick example with two modes:
+
+```bash
+npm run example:recorder-simple           # Finite mode - stops when markets complete
+npm run example:recorder-simple --timeout # Timeout mode - stops after 30 seconds
+```
+
+### Perpetual Recording (`perpetual-greyhound-recorder.ts`)
+Continuously records ALL greyhound markets as they become available:
+
+1. Connects to stream in perpetual mode
+2. Automatically discovers new greyhound markets every 5 minutes
+3. Adds new markets to existing recording session
+4. Runs forever until manually stopped
+5. Perfect for building comprehensive greyhound databases
+
+```bash
+npm run example:recorder-perpetual
 ```
 
 ## Use Cases

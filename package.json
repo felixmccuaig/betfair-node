@@ -23,6 +23,8 @@
     "example:live": "ts-node examples/live-trading-view.ts",
     "example:recorder": "ts-node examples/market-recorder-example.ts",
     "example:recorder-simple": "ts-node examples/simple-market-recorder.ts",
+    "example:recorder-perpetual": "ts-node examples/perpetual-greyhound-recorder.ts",
+    "example:single-market": "ts-node examples/single-market-recorder.ts",
     "prepack": "npm run build",
     "clean": "rimraf dist coverage"
   },

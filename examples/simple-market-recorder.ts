@@ -11,6 +11,7 @@ import {
   stopRecording,
   createRecordingMarketChangeCallback,
   createRawDataCallback,
+  getRecordingCompletionStatus,
   MarketRecordingConfig,
   MarketSort,
 } from '../src/index';
@@ -29,6 +30,9 @@ if (!USERNAME || !PASSWORD || !APP_KEY) {
 
 async function simpleRecordingExample() {
   console.log('🎬 Simple Market Recording Example');
+  console.log('Usage:');
+  console.log('  npm run example:recorder-simple           # Finite mode - stops when markets complete');
+  console.log('  npm run example:recorder-simple --timeout # Timeout mode - stops after 30 seconds');
 
   try {
     // 1. Login to Betfair
@@ -36,17 +40,32 @@ async function simpleRecordingExample() {
     apiState = await login(apiState, APP_KEY, USERNAME, PASSWORD);
     console.log('✅ Logged in successfully');
 
+    // Check command line arguments for mode
+    const args = process.argv.slice(2);
+    const useTimeoutMode = args.includes('--timeout');
+    
     // 2. Configure recording (both types enabled)
+    let streamState: any;
+    let recorderState: any;
+    
     const recordingConfig: MarketRecordingConfig = {
       outputDirectory: './recordings',
       enableBasicRecording: true,   // Store structured market data (BSP, winners, etc.)
       enableRawRecording: true,     // Store raw transmissions line by line
       rawFilePrefix: '',            // Files will be named like "1.123456789.txt"
       basicFilePrefix: 'basic_',    // Files will be named like "basic_1.123456789.json"
+      recordingMode: useTimeoutMode ? 'perpetual' : 'finite', // Choose mode based on args
+      onAllMarketsComplete: useTimeoutMode ? undefined : () => {
+        console.log('✅ All markets completed - stopping recording...');
+        recorderState = stopRecording(recorderState);
+        streamState = closeStream(streamState);
+        console.log('🎉 Recording complete! Check ./recordings/ directory');
+        process.exit(0);
+      }
     };
 
     // 3. Initialize recorder
-    let recorderState = createMarketRecorderState(recordingConfig);
+    recorderState = createMarketRecorderState(recordingConfig);
     console.log('📝 Market recorder initialized');
 
     // 4. Get some markets to record
@@ -89,7 +108,7 @@ async function simpleRecordingExample() {
       throw new Error('Session key not available');
     }
 
-    let streamState = await createAndConnectRecordingStream(
+    streamState = await createAndConnectRecordingStream(
       apiState.sessionKey,
       APP_KEY,
       false, // segmentationEnabled
@@ -102,20 +121,36 @@ async function simpleRecordingExample() {
     streamState = subscribeToMarkets(streamState, marketIds);
     console.log('🔗 Connected and subscribed to markets');
 
-    // 8. Record for 30 seconds
-    console.log('⏱️  Recording for 30 seconds...');
-    await new Promise(resolve => setTimeout(resolve, 30000));
-
-    // 9. Stop recording
-    console.log('🛑 Stopping recording...');
-    recorderState = stopRecording(recorderState);
-    streamState = closeStream(streamState);
-
-    console.log('✅ Recording complete! Check ./recordings/ directory for files:');
-    marketIds.forEach(marketId => {
-      console.log(`  - ${marketId}.txt (raw transmissions)`);
-      console.log(`  - basic_${marketId}.json (structured data)`);
-    });
+    // 8. Handle recording based on mode
+    if (useTimeoutMode) {
+      // Timeout mode for quick testing
+      console.log('⏱️  Recording for 30 seconds (timeout mode)...');
+      await new Promise(resolve => setTimeout(resolve, 30000));
+      
+      console.log('🛑 Timeout reached - stopping recording...');
+      recorderState = stopRecording(recorderState);
+      streamState = closeStream(streamState);
+      
+      console.log('✅ Recording complete! Check ./recordings/ directory for files:');
+      marketIds.forEach(marketId => {
+        console.log(`  - ${marketId}.txt (raw transmissions)`);
+        console.log(`  - basic_${marketId}.json (structured data)`);
+      });
+    } else {
+      // Finite mode - wait for markets to complete
+      const status = getRecordingCompletionStatus(recorderState);
+      console.log(`⏱️  Recording ${status.totalMarkets} markets until completion...`);
+      console.log('🔇 Will stop automatically when all markets complete');
+      
+      // Handle graceful shutdown
+      process.on('SIGINT', () => {
+        console.log('\n🛑 Manual stop requested...');
+        recorderState = stopRecording(recorderState);
+        streamState = closeStream(streamState);
+        console.log('✅ Recording stopped');
+        process.exit(0);
+      });
+    }
 
   } catch (error) {
     console.error('❌ Error:', error);

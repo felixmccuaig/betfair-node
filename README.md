@@ -309,7 +309,16 @@ Comprehensive market data recording system that captures both raw TLS transmissi
 - **Complete Lifecycle**: Records from market open through settlement
 
 ### 📹 Simple Market Recorder (`npm run example:recorder-simple`)
-Streamlined 30-second recording example perfect for testing and quick data capture.
+Streamlined recording example with two modes:
+- **Finite mode**: Records until all markets complete (default)
+- **Timeout mode**: Records for 30 seconds for quick testing (`--timeout` flag)
+
+### 🔄 Perpetual Greyhound Recorder (`npm run example:recorder-perpetual`)
+Advanced perpetual recording system that continuously records ALL greyhound markets:
+- **Auto-discovery**: Finds new markets every 5 minutes
+- **Dynamic recording**: Adds new markets without interrupting existing recordings
+- **Multi-country**: Records from AU, GB, IE, US greyhound tracks
+- **Production ready**: Runs indefinitely until manually stopped
 
 > **📖 Detailed Documentation**: See [`examples/MARKET_RECORDER_README.md`](examples/MARKET_RECORDER_README.md) for comprehensive market recorder documentation including architecture, data flow, and advanced usage.
 
@@ -324,11 +333,17 @@ npm run example:bet
 # Live market view (specify market ID)
 npm run example:live -- marketid=1.234567890
 
-# Record market data (5 minutes, multiple markets)
+# Record market data (stops when all markets complete)
 npm run example:recorder
 
-# Quick recording test (30 seconds, 2 markets)
+# Quick recording test - finite mode (stops when markets complete)
 npm run example:recorder-simple
+
+# Quick recording test - timeout mode (stops after 30 seconds)
+npm run example:recorder-simple --timeout
+
+# Perpetual greyhound recording (runs forever, auto-discovers new markets)
+npm run example:recorder-perpetual
 ```
 
 ## Architecture
@@ -386,6 +401,7 @@ npm run example:bet
 npm run example:live -- marketid=1.234567890
 npm run example:recorder
 npm run example:recorder-simple
+npm run example:recorder-perpetual
 
 # Development mode
 npm run dev

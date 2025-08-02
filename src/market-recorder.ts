@@ -16,6 +16,8 @@ export interface MarketRecordingConfig {
   enableRawRecording: boolean;
   rawFilePrefix?: string;
   basicFilePrefix?: string;
+  recordingMode?: 'finite' | 'perpetual'; // finite = stop when all markets complete, perpetual = run forever
+  onAllMarketsComplete?: () => void; // Callback when all finite markets are complete
 }
 
 export interface BasicMarketRecord {
@@ -57,6 +59,8 @@ export interface MarketRecorderState {
   rawFileStreams: Map<string, fs.WriteStream>;
   basicRecords: Map<string, BasicMarketRecord>;
   isRecording: boolean;
+  subscribedMarkets: Set<string>; // Markets we're actively recording
+  completedMarkets: Set<string>; // Markets that have finished/settled
 }
 
 /**
@@ -69,10 +73,15 @@ export const createMarketRecorderState = (config: MarketRecordingConfig): Market
   }
 
   return {
-    config,
+    config: {
+      recordingMode: 'finite', // Default to finite mode
+      ...config,
+    },
     rawFileStreams: new Map(),
     basicRecords: new Map(),
     isRecording: false,
+    subscribedMarkets: new Set(),
+    completedMarkets: new Set(),
   };
 };
 
@@ -83,7 +92,11 @@ export const startRecording = (
   state: MarketRecorderState, 
   marketIds: string[]
 ): MarketRecorderState => {
-  const updatedState = { ...state, isRecording: true };
+  const updatedState = { 
+    ...state, 
+    isRecording: true,
+    subscribedMarkets: new Set([...state.subscribedMarkets, ...marketIds])
+  };
 
   // Initialize raw file streams if enabled
   if (state.config.enableRawRecording) {
@@ -229,10 +242,83 @@ export const updateBasicRecord = (
 
   state.basicRecords.set(marketId, basicRecord);
 
-  // If market is complete, save the record immediately
+  // If market is complete, save the record immediately and track completion
   if (marketDef.complete || marketDef.status === StreamMarketStatus.CLOSED) {
     saveBasicRecord(state.config, basicRecord);
+    
+    // Mark market as completed
+    if (!state.completedMarkets.has(marketId)) {
+      state.completedMarkets.add(marketId);
+      console.log(`🏁 Market ${marketDef.name || marketId} completed and recorded`);
+      
+      // Check if all finite markets are complete
+      checkAllMarketsComplete(state);
+    }
   }
+};
+
+/**
+ * Checks if all subscribed markets are complete and triggers callback if so
+ */
+const checkAllMarketsComplete = (state: MarketRecorderState): void => {
+  if (state.config.recordingMode === 'perpetual') {
+    return; // Never stop for perpetual recording
+  }
+
+  const allMarketsComplete = Array.from(state.subscribedMarkets).every(marketId => 
+    state.completedMarkets.has(marketId)
+  );
+
+  if (allMarketsComplete && state.subscribedMarkets.size > 0) {
+    console.log(`✅ All ${state.subscribedMarkets.size} markets completed - recording finished!`);
+    if (state.config.onAllMarketsComplete) {
+      state.config.onAllMarketsComplete();
+    }
+  }
+};
+
+/**
+ * Gets completion status for all markets
+ */
+export const getRecordingCompletionStatus = (state: MarketRecorderState): {
+  totalMarkets: number;
+  completedMarkets: number;
+  pendingMarkets: string[];
+  isAllComplete: boolean;
+  recordingMode: 'finite' | 'perpetual';
+} => {
+  const totalMarkets = state.subscribedMarkets.size;
+  const completedMarkets = state.completedMarkets.size;
+  const pendingMarkets = Array.from(state.subscribedMarkets).filter(
+    marketId => !state.completedMarkets.has(marketId)
+  );
+  const isAllComplete = state.config.recordingMode === 'finite' && 
+    totalMarkets > 0 && 
+    completedMarkets === totalMarkets;
+
+  return {
+    totalMarkets,
+    completedMarkets,
+    pendingMarkets,
+    isAllComplete,
+    recordingMode: state.config.recordingMode || 'finite',
+  };
+};
+
+/**
+ * Adds new markets to an existing recording session
+ */
+export const addMarketsToRecording = (
+  state: MarketRecorderState,
+  marketIds: string[]
+): MarketRecorderState => {
+  if (!state.isRecording) {
+    console.warn('Cannot add markets: recording is not active');
+    return state;
+  }
+
+  console.log(`📈 Adding ${marketIds.length} new markets to recording`);
+  return startRecording(state, marketIds);
 };
 
 /**

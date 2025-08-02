@@ -12,6 +12,7 @@ import {
   createRecordingMarketChangeCallback,
   createRawDataCallback,
   getRecordingStatus,
+  getRecordingCompletionStatus,
   MarketRecordingConfig,
   MarketSort,
 } from '../src/index';
@@ -51,16 +52,27 @@ async function recordMarketData() {
     console.log('✅ Logged in successfully');
 
     // 2. Set up market recording configuration
+    let streamState: any;
+    let recorderState: any;
+    
     const recordingConfig: MarketRecordingConfig = {
       outputDirectory: './recordings',
       enableBasicRecording: true,
       enableRawRecording: true,
       rawFilePrefix: 'raw_',
       basicFilePrefix: 'basic_',
+      recordingMode: 'finite', // Stop when all markets complete
+      onAllMarketsComplete: () => {
+        console.log('🛑 All markets completed - stopping recording...');
+        recorderState = stopRecording(recorderState);
+        streamState = closeStream(streamState);
+        console.log('✅ Recording complete! Check ./recordings/ directory for files');
+        process.exit(0);
+      }
     };
 
     // 3. Initialize market recorder
-    let recorderState = createMarketRecorderState(recordingConfig);
+    recorderState = createMarketRecorderState(recordingConfig);
     console.log('✅ Market recorder initialized');
 
     // 4. Find some markets to record (example: next few horse racing markets)
@@ -113,7 +125,7 @@ async function recordMarketData() {
       throw new Error('Session key not available after login');
     }
 
-    let streamState = await createAndConnectRecordingStream(
+    streamState = await createAndConnectRecordingStream(
       apiState.sessionKey,
       APP_KEY,
       false, // segmentationEnabled
@@ -136,30 +148,36 @@ async function recordMarketData() {
       if (status.basicFilePath) console.log(`  - Basic File: ${status.basicFilePath}`);
     });
 
-    // 9. Record for a specified duration (example: 5 minutes)
-    const recordingDurationMs = 5 * 60 * 1000; // 5 minutes
-    console.log(`⏱️  Recording for ${recordingDurationMs / 1000} seconds...`);
-    console.log('🔇 Silent recording mode - pure raw data capture without processing');
+    // 9. Monitor recording progress until all markets complete
+    const status = getRecordingCompletionStatus(recorderState);
+    console.log(`⏱️  Recording ${status.totalMarkets} markets in ${status.recordingMode} mode...`);
+    console.log(`📊 Markets: ${status.completedMarkets} completed, ${status.pendingMarkets.length} pending`);
+    console.log('🔇 Silent recording mode - will stop automatically when all markets complete');
 
-    await new Promise(resolve => setTimeout(resolve, recordingDurationMs));
+    // Show periodic status updates
+    const statusInterval = setInterval(() => {
+      const currentStatus = getRecordingCompletionStatus(recorderState);
+      if (currentStatus.completedMarkets !== status.completedMarkets) {
+        console.log(`📊 Progress: ${currentStatus.completedMarkets}/${currentStatus.totalMarkets} markets completed`);
+        if (currentStatus.pendingMarkets.length > 0 && currentStatus.pendingMarkets.length <= 5) {
+          console.log(`⏳ Waiting for: ${currentStatus.pendingMarkets.join(', ')}`);
+        }
+      }
+    }, 30000); // Update every 30 seconds
 
-    // 10. Stop recording and cleanup
-    console.log('🛑 Stopping recording...');
-    recorderState = stopRecording(recorderState);
-    streamState = closeStream(streamState);
-
-    console.log('✅ Recording stopped and files saved');
-
-    // 11. Show final recording status
-    console.log('\n📁 Final Recording Summary:');
-    marketIds.forEach(marketId => {
-      const status = getRecordingStatus(recorderState, marketId);
-      const marketInfo = marketInfos.find(m => m.marketId === marketId);
-      console.log(`\n📊 ${marketInfo?.eventName} - ${marketInfo?.marketName}`);
-      console.log(`   Market ID: ${marketId}`);
-      if (status.rawFilePath) console.log(`   Raw File: ${status.rawFilePath}`);
-      if (status.basicFilePath) console.log(`   Basic File: ${status.basicFilePath}`);
+    // The recording will automatically stop via the onAllMarketsComplete callback
+    // Keep the process alive
+    process.on('SIGINT', () => {
+      console.log('\n🛑 Manual stop requested...');
+      clearInterval(statusInterval);
+      recorderState = stopRecording(recorderState);
+      streamState = closeStream(streamState);
+      console.log('✅ Recording stopped');
+      process.exit(0);
     });
+
+    // Recording will continue until all markets complete
+    // Process will exit automatically via onAllMarketsComplete callback
 
   } catch (error) {
     console.error('❌ Error:', error);
