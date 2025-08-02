@@ -9,6 +9,11 @@ import {
   RawDataCallback,
   MarketDefinition
 } from './betfair-exchange-stream-api-types';
+import { 
+  BetfairApiState, 
+  listMarketCatalogue 
+} from './betfair-api';
+import { MarketCatalogue, MarketSort } from './betfair-api-types';
 
 // Types for market recording
 export interface MarketRecordingConfig {
@@ -19,6 +24,11 @@ export interface MarketRecordingConfig {
   basicFilePrefix?: string;
   recordingMode?: 'finite' | 'perpetual'; // finite = stop when all markets complete, perpetual = run forever
   onAllMarketsComplete?: () => void; // Callback when all finite markets are complete
+  enrichment?: {
+    enabled: boolean;
+    apiState: BetfairApiState; // Required for REST API calls
+    cacheExpiryMinutes?: number; // How long to cache market catalogue data
+  };
 }
 
 export interface BasicMarketRecord {
@@ -81,6 +91,7 @@ export interface MarketRecorderState {
   isRecording: boolean;
   subscribedMarkets: Set<string>; // Markets we're actively recording
   completedMarkets: Set<string>; // Markets that have finished/settled
+  enrichmentCache: Map<string, { catalogue: MarketCatalogue; cachedAt: Date }>; // Market catalogue cache
 }
 
 /**
@@ -102,6 +113,7 @@ export const createMarketRecorderState = (config: MarketRecordingConfig): Market
     isRecording: false,
     subscribedMarkets: new Set(),
     completedMarkets: new Set(),
+    enrichmentCache: new Map(),
   };
 };
 
@@ -328,6 +340,80 @@ const isMarketTrulyComplete = (
 };
 
 /**
+ * Enriches market data with REST API catalogue information
+ */
+const enrichMarketData = async (
+  state: MarketRecorderState,
+  marketId: string,
+  basicRecord: BasicMarketRecord
+): Promise<BasicMarketRecord> => {
+  if (!state.config.enrichment?.enabled || !state.config.enrichment.apiState) {
+    return basicRecord;
+  }
+
+  try {
+    // Check cache first
+    const cached = state.enrichmentCache.get(marketId);
+    const cacheExpiryMs = (state.config.enrichment.cacheExpiryMinutes || 60) * 60 * 1000;
+    
+    let marketCatalogue: MarketCatalogue | undefined;
+    
+    if (cached && (Date.now() - cached.cachedAt.getTime()) < cacheExpiryMs) {
+      marketCatalogue = cached.catalogue;
+    } else {
+      // Fetch from API
+      const catalogueResponse = await listMarketCatalogue(
+        state.config.enrichment.apiState,
+        { marketIds: [marketId] },
+        ['COMPETITION', 'EVENT', 'EVENT_TYPE', 'MARKET_DESCRIPTION', 'RUNNER_DESCRIPTION', 'RUNNER_METADATA'],
+        MarketSort.FIRST_TO_START,
+        1 // maxResults
+      );
+      
+      if (catalogueResponse.data?.result && catalogueResponse.data.result.length > 0) {
+        marketCatalogue = catalogueResponse.data.result[0];
+        
+        // Cache the result if we have valid data
+        if (marketCatalogue) {
+          state.enrichmentCache.set(marketId, {
+            catalogue: marketCatalogue,
+            cachedAt: new Date()
+          });
+        }
+      }
+    }
+
+    if (!marketCatalogue) {
+      console.warn(`🔍 No market catalogue found for ${marketId}`);
+      return basicRecord;
+    }
+
+    // Enrich market data
+    const enrichedRecord: BasicMarketRecord = {
+      ...basicRecord,
+      marketName: marketCatalogue.marketName || basicRecord.marketName,
+      eventName: marketCatalogue.event?.name || basicRecord.eventName,
+      runners: basicRecord.runners.map(runner => {
+        // Find matching runner in catalogue
+        const catalogueRunner = marketCatalogue!.runners?.find((r: any) => r.selectionId === runner.id);
+        
+        return {
+          ...runner,
+          name: catalogueRunner?.runnerName || runner.name
+        };
+      })
+    };
+
+    console.log(`✨ Enriched market ${marketId}: "${enrichedRecord.marketName}" in "${enrichedRecord.eventName}"`);
+    return enrichedRecord;
+
+  } catch (error) {
+    console.warn(`⚠️ Failed to enrich market ${marketId}:`, error);
+    return basicRecord;
+  }
+};
+
+/**
  * Updates basic market record from market cache
  */
 export const updateBasicRecord = (
@@ -344,16 +430,13 @@ export const updateBasicRecord = (
   // Create or update basic record
   const existingRecord = state.basicRecords.get(marketId);
   
-  // Determine if market is truly complete first
-  const isComplete = isMarketTrulyComplete(marketDef, []);
-
+  // Create basic runner records first (without reconciliation)
   const runners: BasicRunnerRecord[] = Object.values(marketCache.runners).map(runner => {
     // Try to find runner name from market definition
     const runnerDef = marketDef.runners.find(r => r.id === runner.id);
     const runnerName = runnerDef ? getRunnerName(runnerDef) : `Runner ${runner.id}`;
 
-    // Create basic runner record
-    let basicRunner: BasicRunnerRecord = {
+    return {
       id: runner.id,
       name: runnerName,
       status: runner.status,
@@ -368,25 +451,29 @@ export const updateBasicRecord = (
       finalStatus: runner.status,
       isWinner: runner.status === StreamRunnerStatus.WINNER,
     };
+  });
 
-    // Apply reconciliation if market is complete
-    basicRunner = reconcileRunnerData(basicRunner, runner, isComplete);
+  // NOW determine if market is truly complete using the actual runners
+  const isComplete = isMarketTrulyComplete(marketDef, runners);
 
-    return basicRunner;
+  // Apply reconciliation to runners if market is complete
+  const reconciledRunners = runners.map(runner => {
+    const runnerCache = Object.values(marketCache.runners).find(r => r.id === runner.id);
+    return runnerCache ? reconcileRunnerData(runner, runnerCache, isComplete) : runner;
   });
 
   // Calculate market-level reconciliation data
   let reconciliationData: Partial<BasicMarketRecord> = {};
   if (isComplete) {
-    const calculatedTotalTurnover = runners.reduce((sum, runner) => 
+    const calculatedTotalTurnover = reconciledRunners.reduce((sum, runner) => 
       sum + (runner.totalTurnover || 0), 0
     );
     
-    const totalUniquePrice = runners.reduce((sum, runner) => 
+    const totalUniquePrice = reconciledRunners.reduce((sum, runner) => 
       sum + (runner.priceRange?.trades || 0), 0
     );
 
-    const marketDepth = runners.reduce((sum, runner) => 
+    const marketDepth = reconciledRunners.reduce((sum, runner) => 
       sum + (runner.reconciledVolume || runner.tv), 0
     );
 
@@ -413,35 +500,60 @@ export const updateBasicRecord = (
     bspReconciled: marketDef.bspReconciled,
     complete: isComplete, // Use our corrected logic
     numberOfWinners: marketDef.numberOfWinners,
-    runners,
+    runners: reconciledRunners, // Use reconciled runners
     recordedAt: new Date().toISOString(),
     finalTotalMatched: isComplete ? marketDef.totalMatched : undefined,
-    winners: runners.filter(r => r.isWinner).map(r => r.id),
+    winners: reconciledRunners.filter(r => r.isWinner).map(r => r.id),
     ...reconciliationData // Add reconciliation data if market complete
   };
 
   state.basicRecords.set(marketId, basicRecord);
   
-  // If market is complete, save the record immediately and track completion
+  // If market is complete, enrich and save the record
   if (isComplete) {
-    saveBasicRecord(state.config, basicRecord);
+    // Handle enrichment asynchronously
+    const processCompletedMarket = async () => {
+      try {
+        // Enrich the record if enabled
+        const enrichedRecord = await enrichMarketData(state, marketId, basicRecord);
+        
+        // Save the enriched record
+        saveBasicRecord(state.config, enrichedRecord);
+        
+        // Update the stored record with enriched data
+        state.basicRecords.set(marketId, enrichedRecord);
+        
+        // Mark market as completed
+        if (!state.completedMarkets.has(marketId)) {
+          state.completedMarkets.add(marketId);
+          
+          // Log completion with reconciliation info
+          const totalTurnover = enrichedRecord.calculatedTotalTurnover;
+          const marketDepth = enrichedRecord.liquidityProfile?.marketDepth;
+          const reconciliationMsg = totalTurnover && marketDepth 
+            ? ` (reconciled: £${totalTurnover.toFixed(2)} turnover, ${marketDepth.toFixed(0)} volume)`
+            : '';
+          
+          console.log(`🏁 Market "${enrichedRecord.marketName}" completed and recorded${reconciliationMsg}`);
+          
+          // Check if all finite markets are complete
+          checkAllMarketsComplete(state);
+        }
+      } catch (error) {
+        console.error(`❌ Error processing completed market ${marketId}:`, error);
+        
+        // Fallback: save without enrichment
+        saveBasicRecord(state.config, basicRecord);
+        
+        if (!state.completedMarkets.has(marketId)) {
+          state.completedMarkets.add(marketId);
+          checkAllMarketsComplete(state);
+        }
+      }
+    };
     
-    // Mark market as completed
-    if (!state.completedMarkets.has(marketId)) {
-      state.completedMarkets.add(marketId);
-      
-      // Log completion with reconciliation info
-      const totalTurnover = basicRecord.calculatedTotalTurnover;
-      const marketDepth = basicRecord.liquidityProfile?.marketDepth;
-      const reconciliationMsg = totalTurnover && marketDepth 
-        ? ` (reconciled: £${totalTurnover.toFixed(2)} turnover, ${marketDepth.toFixed(0)} volume)`
-        : '';
-      
-      console.log(`🏁 Market ${marketDef.name || marketId} completed and recorded${reconciliationMsg}`);
-      
-      // Check if all finite markets are complete
-      checkAllMarketsComplete(state);
-    }
+    // Execute async processing
+    processCompletedMarket();
   }
 };
 

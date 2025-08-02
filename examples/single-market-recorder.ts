@@ -56,13 +56,18 @@ async function recordSingleMarket() {
       rawFilePrefix: 'raw_',
       basicFilePrefix: 'basic_',
       recordingMode: 'finite', // Will stop when this market completes
+      enrichment: {
+        enabled: true, // Enable market enrichment with real names
+        apiState: apiState, // Pass the authenticated API state
+        cacheExpiryMinutes: 30 // Cache market data for 30 minutes
+      },
       onAllMarketsComplete: () => {
         console.log(`✅ Market ${marketId} completed - stopping recording...`);
         recorderState = stopRecording(recorderState);
         streamState = closeStream(streamState);
         console.log('🎉 Recording complete! Files saved:');
         console.log(`  - raw_${marketId}.txt`);
-        console.log(`  - basic_${marketId}.json`);
+        console.log(`  - basic_${marketId}.json (with real market/runner names)`);
         process.exit(0);
       }
     };
