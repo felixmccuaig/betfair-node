@@ -1,6 +1,6 @@
 # betfair-node
 
-A comprehensive Node.js TypeScript library for the Betfair Exchange API, providing both JSON-RPC API integration and real-time Exchange Stream API support for automated betting and trading applications.
+A comprehensive Node.js TypeScript library for the Betfair Exchange API, providing both JSON-RPC API integration and real-time Exchange Stream API support for automated betting and trading applications. Features advanced market recording capabilities for capturing raw TLS stream data and structured market summaries.
 
 [![npm version](https://badge.fury.io/js/betfair-node.svg)](https://badge.fury.io/js/betfair-node)
 [![TypeScript](https://img.shields.io/badge/TypeScript-Ready-blue.svg)](https://www.typescriptlang.org/)
@@ -311,6 +311,8 @@ Comprehensive market data recording system that captures both raw TLS transmissi
 ### 📹 Simple Market Recorder (`npm run example:recorder-simple`)
 Streamlined 30-second recording example perfect for testing and quick data capture.
 
+> **📖 Detailed Documentation**: See [`examples/MARKET_RECORDER_README.md`](examples/MARKET_RECORDER_README.md) for comprehensive market recorder documentation including architecture, data flow, and advanced usage.
+
 ### Usage
 ```bash
 # List greyhound markets
@@ -336,6 +338,7 @@ npm run example:recorder-simple
 - **BetfairApi**: Main API client for JSON-RPC endpoints
 - **BetfairExchangeStreamApi**: Real-time streaming client  
 - **BetfairStreamDecoder**: Handles stream data deserialization and caching
+- **MarketRecorder**: Dual-layer recording system for raw TLS data and structured summaries
 - **Heartbeat**: Connection monitoring and health checking
 - **Utils**: Helper functions for validation and calculations
 
@@ -381,6 +384,8 @@ npm run build
 npm run example:greyhounds
 npm run example:bet
 npm run example:live -- marketid=1.234567890
+npm run example:recorder
+npm run example:recorder-simple
 
 # Development mode
 npm run dev
@@ -407,10 +412,12 @@ Contributions are welcome! Please feel free to submit a Pull Request. For major 
 
 - 🔐 Certificate-based authentication support
 - 📊 Advanced market analysis utilities  
-- 🎯 Strategy backtesting framework
-- 📈 Historical data integration
+- 🎯 Strategy backtesting framework using recorded market data
+- 📈 Historical data integration and replay functionality
 - 🔄 Enhanced request conflation
 - 📱 React/Vue.js integration examples
+- 🗂️ Market recording database integration (PostgreSQL/MongoDB)
+- 📊 Real-time recording dashboard and monitoring
 
 ## License
 
