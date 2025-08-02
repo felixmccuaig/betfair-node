@@ -321,6 +321,12 @@ npm run example:bet
 
 # Live market view (specify market ID)
 npm run example:live -- marketid=1.234567890
+
+# Record market data (5 minutes, multiple markets)
+npm run example:recorder
+
+# Quick recording test (30 seconds, 2 markets)
+npm run example:recorder-simple
 ```
 
 ## Architecture
