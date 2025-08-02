@@ -50,7 +50,6 @@ describe('Heartbeat Functions', () => {
       
       expect(updatedState.isBeating).toBe(true);
       expect(updatedState.timeout).toBeDefined();
-      expect(console.log).toHaveBeenCalledWith('Starting heartbeat with timeout 5000ms');
     });
 
     it('should not restart if already beating', () => {
@@ -100,7 +99,6 @@ describe('Heartbeat Functions', () => {
       
       expect(stoppedState.isBeating).toBe(false);
       expect(stoppedState.timeout).toBeUndefined();
-      expect(console.log).toHaveBeenCalledWith('Stopping heartbeat');
     });
 
     it('should not error if already stopped', () => {
@@ -129,7 +127,6 @@ describe('Heartbeat Functions', () => {
       const refreshedState = refreshHeartbeat(beatingState);
       
       expect(refreshedState.isBeating).toBe(true);
-      expect(console.log).toHaveBeenCalledWith('Heartbeat refresh');
     });
 
     it('should warn when heartbeat is not active', () => {

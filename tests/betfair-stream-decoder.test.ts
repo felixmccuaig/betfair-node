@@ -392,7 +392,7 @@ describe('Stream Decoder Functions', () => {
       expect(market).toBeDefined();
       const runner = market!.runners['123456'];
       expect(runner).toBeDefined();
-      expect(runner!.ltp).toBe(1.7); // 2.0 * 0.85
+      expect(runner!.ltp).toBe(2.0); // LTP kept in original currency (GBP) to match back/lay prices
     });
 
     it('should accumulate deltas correctly', () => {
