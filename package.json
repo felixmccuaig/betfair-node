@@ -2,10 +2,27 @@
   "name": "betfair-node",
   "version": "1.0.0",
   "description": "A nodejs package for the Betfair JSON-RPC api with Exchange Stream Api support.",
-  "main": "index.js",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist/"
+  ],
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "example": "ts-node example/example.ts"
+    "build": "tsc",
+    "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "lint": "eslint src/**/*.ts",
+    "lint:fix": "eslint src/**/*.ts --fix",
+    "format": "prettier --write src/**/*.ts tests/**/*.ts",
+    "format:check": "prettier --check src/**/*.ts tests/**/*.ts",
+    "example": "ts-node example/example.ts",
+    "example:greyhounds": "ts-node examples/greyhound-markets.ts",
+    "example:bet": "ts-node examples/place-bet.ts",
+    "example:live": "ts-node examples/live-trading-view.ts",
+    "prepack": "npm run build",
+    "clean": "rimraf dist coverage"
   },
   "keywords": [
     "Betfair",
@@ -20,17 +37,27 @@
   "author": "Felix McCuaig",
   "license": "MIT",
   "dependencies": {
-    "assert": "^2.0.0",
-    "axios": "^0.21.1",
-    "query-string": "^7.0.0",
-    "readline": "^1.3.0",
-    "tls": "0.0.1",
-    "typescript": "^4.3.2",
-    "util": "^0.12.3",
-    "uuid": "^8.3.2",
-    "winston": "^3.3.3"
+    "axios": "^1.6.2",
+    "dotenv": "^17.2.1",
+    "query-string": "^8.1.0",
+    "uuid": "^9.0.1",
+    "winston": "^3.11.0"
   },
   "devDependencies": {
-    "@types/node": "^15.6.1"
+    "@types/dotenv": "^6.1.1",
+    "@types/jest": "^29.5.8",
+    "@types/node": "^20.9.0",
+    "@types/uuid": "^9.0.7",
+    "@typescript-eslint/eslint-plugin": "^6.12.0",
+    "@typescript-eslint/parser": "^6.12.0",
+    "eslint": "^8.54.0",
+    "eslint-config-prettier": "^9.0.0",
+    "jest": "^29.7.0",
+    "prettier": "^3.1.0",
+    "rimraf": "^5.0.5",
+    "ts-jest": "^29.1.1",
+    "ts-node": "^10.9.1",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^5.2.2"
   }
 }
