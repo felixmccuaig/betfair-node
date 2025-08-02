@@ -250,8 +250,8 @@ describe('Betfair Exchange Stream API Functions', () => {
         state.heartbeat.onHeartAttack();
       }).not.toThrow();
 
-      expect(console.error).toHaveBeenCalledWith(
-        'Heart attack detected, stream needs restart'
+      expect(console.warn).toHaveBeenCalledWith(
+        'Heartbeat timeout detected - stream may be stale, but continuing...'
       );
     });
   });

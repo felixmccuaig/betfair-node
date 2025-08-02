@@ -10,7 +10,7 @@ module.exports = {
     '^.+\\.ts$': 'ts-jest'
   },
   transformIgnorePatterns: [
-    'node_modules/(?!(query-string|decode-uri-component|split-on-first|filter-obj)/)'
+    'node_modules/(?!query-string|decode-uri-component|split-on-first|filter-obj|.*\\.mjs$)'
   ],
   collectCoverageFrom: [
     'src/**/*.ts',

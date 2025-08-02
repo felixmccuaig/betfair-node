@@ -1,4 +1,4 @@
-import querystring from 'query-string';
+import * as querystring from 'querystring';
 import axios, { AxiosResponse } from 'axios';
 
 import {

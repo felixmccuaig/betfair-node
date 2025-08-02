@@ -65,7 +65,6 @@
   "dependencies": {
     "axios": "^1.6.2",
     "dotenv": "^17.2.1",
-    "query-string": "^8.1.0",
     "uuid": "^9.0.1",
     "winston": "^3.11.0"
   },

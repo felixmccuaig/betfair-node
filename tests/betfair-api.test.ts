@@ -48,7 +48,7 @@ import { CurrencyRate, MarketCache } from '../src/betfair-exchange-stream-api-ty
 import axios from 'axios';
 
 // Mock dependencies
-jest.mock('query-string', () => ({
+jest.mock('querystring', () => ({
   stringify: jest.fn((obj) => Object.keys(obj).map(key => `${key}=${obj[key]}`).join('&')),
 }));
 

@@ -129,11 +129,11 @@ describe('Heartbeat Functions', () => {
       expect(refreshedState.isBeating).toBe(true);
     });
 
-    it('should warn when heartbeat is not active', () => {
+    it('should not change state when heartbeat is not active', () => {
       const refreshedState = refreshHeartbeat(initialState);
       
       expect(refreshedState.isBeating).toBe(false);
-      expect(console.warn).toHaveBeenCalledWith('Heart is not beating!');
+      expect(refreshedState).toEqual(initialState);
     });
 
     it('should extend timeout when refreshed', () => {
