@@ -28,6 +28,7 @@ A comprehensive Node.js TypeScript library for the Betfair Exchange API, providi
 
 ### 📊 **Professional Trading Features**
 - **Price Ladder Display**: Real-time price ladder visualization
+- **Price Ladder Utilities**: Complete Betfair price ladder generation and tick navigation
 - **Market Caching**: Efficient delta-based market state management  
 - **Request Conflation**: Batch multiple market subscriptions for efficiency
 - **Currency Conversion**: Automatic currency rate handling and conversion
@@ -176,7 +177,44 @@ async function placeBet() {
 }
 ```
 
-### 5. Market Recording
+### 5. Price Ladder Navigation
+
+```typescript
+import { 
+  getTickSize,
+  getNextTick,
+  getPreviousTick,
+  getNearestValidPrice,
+  generatePriceLadder 
+} from 'betfair-node';
+
+// Get tick sizes for different price ranges
+console.log(getTickSize(1.5));   // 0.01 (1.01-2 range)
+console.log(getTickSize(3.35));  // 0.05 (3-4 range)  
+console.log(getTickSize(120));   // 10 (100-1000 range)
+
+// Navigate price ladder
+console.log(getNextTick(120));     // 130
+console.log(getNextTick(3.35));    // 3.4
+console.log(getPreviousTick(130)); // 120
+console.log(getPreviousTick(3.4)); // 3.35
+
+// Round invalid prices to valid ladder prices
+console.log(getNearestValidPrice(1.234));           // 1.23 (nearest)
+console.log(getNearestValidPrice(3.123, 'up'));     // 3.15 (round up)
+console.log(getNearestValidPrice(3.149, 'down'));   // 3.1 (round down)
+
+// Generate complete price ladder (memoized for performance)
+const ladder = generatePriceLadder(1.90, 2.10);
+console.log(ladder); 
+// [1.9, 1.91, 1.92, ..., 1.99, 2, 2.02, 2.04, ..., 2.1]
+
+// Betfair price ranges and increments:
+// 1.01→2: 0.01 | 2→3: 0.02 | 3→4: 0.05 | 4→6: 0.1 | 6→10: 0.2
+// 10→20: 0.5 | 20→30: 1 | 30→50: 2 | 50→100: 5 | 100→1000: 10
+```
+
+### 6. Market Recording
 
 ```typescript
 import { 
@@ -279,10 +317,19 @@ async function recordMarketData() {
 - `unsubscribeFromMarkets(state, marketIds?)` - Unsubscribe from markets
 
 ### Utility Functions
+
+#### General Utilities
 - `validateOrderParameters(instructions)` - Validate bet parameters
 - `calculateBackProfit(stake, odds)` - Calculate back bet profit
 - `calculateLayLiability(stake, odds)` - Calculate lay bet liability
 - `findCurrencyRate(rates, currency)` - Find currency conversion rate
+
+#### Price Ladder Functions
+- `getTickSize(price)` - Get the appropriate tick increment for any price
+- `generatePriceLadder(minPrice?, maxPrice?)` - Generate complete price ladder with memoization
+- `getNextTick(price)` - Get the next valid tick price (or null if at maximum)
+- `getPreviousTick(price)` - Get the previous valid tick price (or null if at minimum)
+- `getNearestValidPrice(price, direction?)` - Round to nearest valid price ('up', 'down', or 'nearest')
 
 ## Examples
 
