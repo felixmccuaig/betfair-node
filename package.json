@@ -1,6 +1,6 @@
 {
   "name": "betfair-node",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "description": "A comprehensive Node.js TypeScript library for the Betfair Exchange API, providing both JSON-RPC API integration and real-time Exchange Stream API support for automated betting and trading applications.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
