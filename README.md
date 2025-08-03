@@ -64,34 +64,38 @@ import { createBetfairApiState, login, listMarketCatalogue } from 'betfair-node'
 
 async function main() {
   // Create API state
-  const apiState = createBetfairApiState('AUD', 'en');
+  const apiState = createBetfairApiState(
+    'en',    // locale
+    'AUD',   // currency
+    500,     // conflateMs
+    5000,    // heartbeatMs
+    () => {} // marketChangeCallback (not used in this example)
+  );
   
   // Login to Betfair
-  const authResult = await login(
+  const authenticatedState = await login(
     apiState,
     process.env.BETFAIR_APP_KEY!,
     process.env.BETFAIR_USERNAME!,
     process.env.BETFAIR_PASSWORD!
   );
   
-  if (authResult.success) {
-    // List horse racing markets
-    const marketFilter = {
-      eventTypeIds: ['7'], // Horse Racing
-      marketCountries: ['AU'],
-      marketTypeCodes: ['WIN']
-    };
-    
-    const markets = await listMarketCatalogue(
-      authResult.state,
-      marketFilter,
-      ['MARKET_START_TIME', 'RUNNER_DESCRIPTION'],
-      'FIRST_TO_START',
-      10
-    );
-    
-    console.log(`Found ${markets.length} markets`);
-  }
+  // List horse racing markets
+  const marketFilter = {
+    eventTypeIds: ['7'], // Horse Racing
+    marketCountries: ['AU'],
+    marketTypeCodes: ['WIN']
+  };
+  
+  const markets = await listMarketCatalogue(
+    authenticatedState,
+    marketFilter,
+    ['MARKET_START_TIME', 'RUNNER_DESCRIPTION'],
+    'FIRST_TO_START',
+    10
+  );
+  
+  console.log(`Found ${markets.data.result.length} markets`);
 }
 ```
 
@@ -107,31 +111,39 @@ import {
 
 async function streamMarketData() {
   // Setup and authenticate
-  const apiState = createBetfairApiState('AUD', 'en');
-  const authResult = await login(apiState, appKey, username, password);
-  
-  if (authResult.success) {
-    // Create stream connection
-    const streamResult = await createAndConnectStream(
-      authResult.state.sessionKey!,
-      authResult.state.appKey!,
-      500, // conflation ms
-      500, // heartbeat ms
-      (marketCache, deltas) => {
-        // Handle real-time market updates
-        console.log('Market update received:', Object.keys(marketCache));
-      }
-    );
-    
-    if (streamResult.success) {
-      // Subscribe to specific markets
-      await subscribeToMarkets(
-        streamResult.state,
-        ['1.234567890'], // market IDs
-        ['EX_BEST_OFFERS'] // price data fields
-      );
+  const apiState = createBetfairApiState(
+    'en',    // locale
+    'AUD',   // currency
+    500,     // conflateMs
+    5000,    // heartbeatMs
+    (marketCache, deltas) => {
+      // Handle real-time market updates
+      console.log('Market update received:', Object.keys(marketCache));
     }
-  }
+  );
+  
+  const authenticatedState = await login(apiState, appKey, username, password);
+  
+  // Create stream connection
+  const streamState = await createAndConnectStream(
+    authenticatedState.sessionKey!,
+    authenticatedState.appKey!,
+    false,   // segmentationEnabled
+    500,     // conflateMs
+    5000,    // heartbeatMs
+    { currencyCode: 'AUD', rate: 1.0 }, // audCurrencyRate
+    (marketCache, deltas) => {
+      // Handle real-time market updates
+      console.log('Market update received:', Object.keys(marketCache));
+    }
+  );
+  
+  // Subscribe to specific markets
+  await subscribeToMarkets(
+    streamState,
+    ['1.234567890'], // market IDs
+    ['EX_BEST_OFFERS'] // price data fields
+  );
 }
 ```
 
@@ -146,33 +158,46 @@ import {
 } from 'betfair-node';
 
 async function placeBet() {
-  const apiState = createBetfairApiState('AUD', 'en');
-  const authResult = await login(apiState, appKey, username, password);
+  const apiState = createBetfairApiState(
+    'en',    // locale
+    'AUD',   // currency
+    500,     // conflateMs
+    5000,    // heartbeatMs
+    () => {} // marketChangeCallback (not used in this example)
+  );
   
-  if (authResult.success) {
+  const authenticatedState = await login(apiState, appKey, username, password);
+  
+  const marketId = '1.234567890';
+  const selectionId = 123456;
+  const price = 2.50;
+  const size = 10.00;
+  
+  // Validate before placing
+  const validation = validateOrderParameters(marketId, selectionId, price, size);
+  if (validation.isValid) {
     const placeInstruction = {
       orderType: 'LIMIT' as const,
-      selectionId: 123456,
+      selectionId: selectionId,
       side: 'BACK' as const,
       limitOrder: {
-        size: 10.00,
-        price: 2.50,
+        size: size,
+        price: price,
         persistenceType: 'LAPSE' as const
       }
     };
     
-    // Validate before placing
-    const validation = validateOrderParameters([placeInstruction]);
-    if (validation.isValid) {
-      const result = await placeOrders(
-        authResult.state,
-        '1.234567890', // market ID
-        [placeInstruction],
-        'my-bet-ref'
-      );
-      
-      console.log('Bet placed:', result);
-    }
+    const result = await placeOrders(
+      authenticatedState,
+      marketId,
+      [placeInstruction],
+      'my-bet-ref',
+      undefined, // marketVersion
+      undefined, // customerStrategyRef
+      false      // async
+    );
+    
+    console.log('Bet placed:', result);
   }
 }
 ```
@@ -232,7 +257,7 @@ import {
 async function recordMarketData() {
   // Setup authentication
   const apiState = createBetfairApiState('en', 'AUD', 250, 5000, () => {});
-  const authResult = await login(apiState, appKey, username, password);
+  const authenticatedState = await login(apiState, appKey, username, password);
 
   // Configure recording (both raw and structured data)
   const recorderState = createMarketRecorderState({
@@ -251,7 +276,7 @@ async function recordMarketData() {
 
   // Connect with recording-optimized stream (30s heartbeat)
   const streamState = await createAndConnectRecordingStream(
-    authResult.sessionKey,
+    authenticatedState.sessionKey!,
     appKey,
     false,                        // segmentationEnabled
     250,                          // conflateMs
@@ -273,9 +298,9 @@ async function recordMarketData() {
 ### Core Functions
 
 #### Authentication
-- `createBetfairApiState(currency, locale)` - Create initial API state
-- `login(state, appKey, username, password)` - Authenticate with Betfair
-- `logout(state)` - End session
+- `createBetfairApiState(locale, currencyCode, conflateMs, heartbeatMs, marketChangeCallback)` - Create initial API state
+- `login(state, appKey, username, password)` - Authenticate with Betfair and return updated state
+- `logout(sessionKey)` - End session
 
 #### Market Data
 - `listEventTypes(state, filter)` - Get available sports/event types
@@ -307,9 +332,9 @@ async function recordMarketData() {
 ### Streaming API
 
 #### Connection Management
-- `createAndConnectStream(sessionKey, appKey, conflateMs, heartbeatMs, callback, rawCallback?)` - Connect to stream
-- `createAndConnectRecordingStream(sessionKey, appKey, segmentationEnabled, conflateMs, audCurrencyRate, marketCallback, rawCallback?)` - Connect with recording optimization (30s heartbeat)
-- `disconnectStream(state)` - Disconnect from stream
+- `createAndConnectStream(authToken, appKey, segmentationEnabled, conflateMs, heartbeatMs, audCurrencyRate, marketChangeCallback, rawDataCallback?)` - Connect to stream
+- `createAndConnectRecordingStream(authToken, appKey, segmentationEnabled, conflateMs, audCurrencyRate, marketChangeCallback, rawDataCallback?)` - Connect with recording optimization (30s heartbeat)
+- `closeStream(state)` - Disconnect from stream
 
 #### Market Subscriptions
 - `subscribeToMarkets(state, marketIds, fields, segmentationEnabled?)` - Subscribe to markets
@@ -319,7 +344,7 @@ async function recordMarketData() {
 ### Utility Functions
 
 #### General Utilities
-- `validateOrderParameters(instructions)` - Validate bet parameters
+- `validateOrderParameters(marketId, selectionId, price, size)` - Validate bet parameters
 - `calculateBackProfit(stake, odds)` - Calculate back bet profit
 - `calculateLayLiability(stake, odds)` - Calculate lay bet liability
 - `findCurrencyRate(rates, currency)` - Find currency conversion rate
@@ -367,6 +392,22 @@ Advanced perpetual recording system that continuously records ALL greyhound mark
 - **Multi-country**: Records from AU, GB, IE, US greyhound tracks
 - **Production ready**: Runs indefinitely until manually stopped
 
+### 📚 Historical Data Backtesting
+Analyze historical Betfair Exchange data files to generate market and runner-level analytics for research and strategy testing.
+
+• Simple Backtest (`npm run example:backtest`)
+  - Easy to run, processes a historical file from `examples/`
+  - Outputs JSON records and a summary report in `backtest_results/`
+
+• Advanced Backtest (`npm run example:backtest-verbose`)
+  - Programmatic API for custom analysis with verbose logging options
+
+Input format: line-delimited JSON with Betfair Exchange Stream `mcm` messages. Place a file (e.g., `examples/1.216777904`) in the examples directory.
+
+Outputs: JSON records per market and an aggregated `backtest_summary.json` in `backtest_results/`.
+
+See detailed docs: `examples/BACKTEST_README.md`.
+
 > **📖 Detailed Documentation**: See [`examples/MARKET_RECORDER_README.md`](examples/MARKET_RECORDER_README.md) for comprehensive market recorder documentation including architecture, data flow, and advanced usage.
 
 ### Usage
@@ -391,6 +432,12 @@ npm run example:recorder-simple --timeout
 
 # Perpetual greyhound recording (runs forever, auto-discovers new markets)
 npm run example:recorder-perpetual
+
+# Simple historical backtest (reads file from examples/)
+npm run example:backtest
+
+# Advanced/verbose backtest
+npm run example:backtest-verbose
 ```
 
 ## Architecture
