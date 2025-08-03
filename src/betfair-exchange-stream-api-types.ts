@@ -68,21 +68,21 @@ export type MarketChangeMessage = ChangeMessage & {
 };
 
 export type RunnerChange = {
-  id: number; //Selection ID
-  con: boolean; //Conflated
-  tv: number; //Traded volume
-  ltp: number; //Last traded price
-  spn: number; //Starting price near
-  spf: number; //Starting price far
-  batb: [number, number, number][]; //Best available to back [level, price, size] array
-  batl: [number, number, number][]; //Best available to lay [level, price, size] array
-  bdatb: [number, number, number][]; //Best display available to back [level, price, size] array
-  bdatl: [number, number, number][]; //Best display available to back [level, price, size] array
-  atb: [number, number][]; //Available to back [price, size] array
-  atl: [number, number][]; //Available to lay [price, size] array
-  spb: [number, number][]; //Starting price back [price, size] array
-  spl: [number, number][]; //Starting price lay [price, size] array
-  trd: [number, number][]; //Traded [price, size] array
+  id: number; //Selection ID (always present)
+  con?: boolean; //Conflated
+  tv?: number; //Traded volume
+  ltp?: number; //Last traded price
+  spn?: number; //Starting price near
+  spf?: number; //Starting price far
+  batb?: [number, number, number][]; //Best available to back [level, price, size] array
+  batl?: [number, number, number][]; //Best available to lay [level, price, size] array
+  bdatb?: [number, number, number][]; //Best display available to back [level, price, size] array
+  bdatl?: [number, number, number][]; //Best display available to back [level, price, size] array
+  atb?: [number, number][]; //Available to back [price, size] array
+  atl?: [number, number][]; //Available to lay [price, size] array
+  spb?: [number, number][]; //Starting price back [price, size] array
+  spl?: [number, number][]; //Starting price lay [price, size] array
+  trd?: [number, number][]; //Traded [price, size] array
 };
 
 export type MarketDefinition = {
@@ -131,12 +131,12 @@ export type RunnerDefinition = {
 };
 
 export type MarketChange = {
-  rc: RunnerChange[];
-  img: boolean;
-  tv: number;
-  con: boolean;
-  marketDefinition: MarketDefinition;
-  id: string;
+  id: string; //Market ID (always present)
+  rc?: RunnerChange[]; //Runner changes
+  img?: boolean; //Image - replace existing data
+  tv?: number; //Total volume traded
+  con?: boolean; //Conflated
+  marketDefinition?: MarketDefinition; //Market definition
 };
 
 export type MarketCache = {

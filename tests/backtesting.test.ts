@@ -1,3 +1,27 @@
+/**
+ * Backtesting Test Suite
+ * 
+ * This test suite validates the historical data backtesting functionality using
+ * carefully crafted test market data files. It verifies that the system correctly:
+ * 
+ * 1. ✅ Winner Detection - Identifies winning and losing runners
+ * 2. ✅ Volume Preservation - Maintains trading volumes despite settlement zeroing
+ * 3. ✅ Multiple Trades - Processes complex trading patterns with price changes
+ * 4. ✅ BSP Reconciliation - Handles multiple winners (place markets)
+ * 5. ✅ Turnover Calculations - Accurately calculates turnover from trading data
+ * 6. ✅ Price Range Analysis - Extracts min/max prices and trade counts
+ * 7. ✅ Error Handling - Properly handles missing files
+ * 
+ * Test Data Files:
+ * - simple-winner.json: Basic market with clear winner (3 runners)
+ * - volume-preservation.json: Tests volume preservation during settlement (2 runners)
+ * - multiple-trades.json: Complex trading with multiple price points (4 runners)
+ * - bsp-reconciliation.json: Place market with 2 winners (5 runners)
+ * 
+ * These tests ensure that the backtesting system produces accurate, reliable
+ * results for historical analysis and strategy development.
+ */
+
 import * as fs from 'fs';
 import * as path from 'path';
 

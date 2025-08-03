@@ -160,6 +160,33 @@ const processMarketChange = (
       marketDefinition: marketChange.marketDefinition,
     };
     deltas.push(`Market definition updated for ${marketId}`);
+    
+    // Extract runner status updates from market definition
+    if (marketChange.marketDefinition.runners) {
+      const statusUpdates: string[] = [];
+      const updatedRunners = { ...market.runners };
+      
+      for (const runnerDef of marketChange.marketDefinition.runners) {
+        const selectionId = runnerDef.id.toString();
+        
+        if (updatedRunners[selectionId] && runnerDef.status) {
+          const oldStatus = updatedRunners[selectionId].status;
+          updatedRunners[selectionId] = {
+            ...updatedRunners[selectionId],
+            status: runnerDef.status,
+          };
+          
+          if (oldStatus !== runnerDef.status) {
+            statusUpdates.push(`Runner ${selectionId} status: ${oldStatus} → ${runnerDef.status}`);
+          }
+        }
+      }
+      
+      if (statusUpdates.length > 0) {
+        market = { ...market, runners: updatedRunners };
+        deltas.push(...statusUpdates);
+      }
+    }
   }
 
   // Process runner changes
@@ -213,7 +240,13 @@ const processRunnerChanges = (
     }
 
     if (runnerChange.tv !== undefined) {
-      runner = { ...runner, tv: runnerChange.tv };
+      // Don't overwrite existing volume with zero during settlement
+      if (runnerChange.tv > 0 || runner.tv === 0) {
+        runner = { ...runner, tv: runnerChange.tv };
+        // console.log(`📊 Runner ${selectionId} TV updated to: ${runnerChange.tv}`);
+      } else {
+        // console.log(`🚫 Ignoring zero TV update for runner ${selectionId} (preserving ${runner.tv})`);
+      }
     }
 
     if (runnerChange.batb) {
@@ -255,8 +288,16 @@ const processRunnerChanges = (
 
     // Trading data
     if (runnerChange.trd) {
-      runner = { ...runner, trd: runnerChange.trd };
-      deltas.push(`Trading data updated for runner ${selectionId}: ${runnerChange.trd.length} trades`);
+      const totalTraded = runnerChange.trd.reduce((sum, [price, volume]) => sum + volume, 0);
+      
+      // Don't overwrite existing trading data with empty/zero data during settlement
+      if (totalTraded > 0 || !runner.trd || runner.trd.length === 0) {
+        runner = { ...runner, trd: runnerChange.trd };
+        deltas.push(`Trading data updated for runner ${selectionId}: ${runnerChange.trd.length} trades, total volume: ${totalTraded}`);
+        // console.log(`🔄 Trading data for runner ${selectionId}:`, runnerChange.trd, `total: ${totalTraded}`);
+      } else {
+        // console.log(`🚫 Ignoring zero trading data update for runner ${selectionId} (preserving existing data)`);
+      }
     }
 
     updatedRunners[selectionId] = runner;

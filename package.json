@@ -11,6 +11,7 @@
     "build": "tsc",
     "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
     "test": "jest",
+    "test:backtest": "jest backtesting.test.ts",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
     "lint": "eslint src/**/*.ts",
@@ -25,6 +26,8 @@
     "example:recorder-simple": "ts-node examples/simple-market-recorder.ts",
     "example:recorder-perpetual": "ts-node examples/perpetual-greyhound-recorder.ts",
     "example:single-market": "ts-node examples/single-market-recorder.ts",
+    "example:backtest": "ts-node examples/simple-backtest.ts",
+    "example:backtest-verbose": "ts-node examples/historical-data-backtest.ts",
     "prepack": "npm run build",
     "clean": "rimraf dist coverage"
   },
