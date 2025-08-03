@@ -12,6 +12,7 @@ import {
   loadBasicRecord,
   listRecordedMarkets,
   MarketRecordingConfig,
+  registerRecorderProcessCleanup,
 } from '../src/market-recorder';
 import {
   MarketCache,
@@ -163,10 +164,8 @@ describe('Market Recorder', () => {
   });
 
   test('should create market recorder state', () => {
-    // Debug the paths
-    console.log('__dirname:', __dirname);
-    console.log('TEST_OUTPUT_DIR:', TEST_OUTPUT_DIR);
-    console.log('Directory exists:', fs.existsSync(TEST_OUTPUT_DIR));
+    // Ensure the test output directory exists
+    expect(fs.existsSync(TEST_OUTPUT_DIR)).toBe(true);
     
     const state = createMarketRecorderState(config);
 
@@ -179,43 +178,51 @@ describe('Market Recorder', () => {
 
   test('should start recording for markets', () => {
     let state = createMarketRecorderState(config);
+    registerRecorderProcessCleanup(state);
     const marketIds = ['1.123', '1.456'];
+    try {
+      state = startRecording(state, marketIds);
 
-    state = startRecording(state, marketIds);
+      expect(state.isRecording).toBe(true);
+      expect(state.rawFileStreams.size).toBe(2);
+      expect(state.rawFileStreams.has('1.123')).toBe(true);
+      expect(state.rawFileStreams.has('1.456')).toBe(true);
 
-    expect(state.isRecording).toBe(true);
-    expect(state.rawFileStreams.size).toBe(2);
-    expect(state.rawFileStreams.has('1.123')).toBe(true);
-    expect(state.rawFileStreams.has('1.456')).toBe(true);
-
-    // Verify stream objects are created and writable
-    const stream1 = state.rawFileStreams.get('1.123');
-    const stream2 = state.rawFileStreams.get('1.456');
-    expect(stream1).toBeDefined();
-    expect(stream2).toBeDefined();
-    expect(stream1!.writable).toBe(true);
-    expect(stream2!.writable).toBe(true);
+      // Verify stream objects are created and writable
+      const stream1 = state.rawFileStreams.get('1.123');
+      const stream2 = state.rawFileStreams.get('1.456');
+      expect(stream1).toBeDefined();
+      expect(stream2).toBeDefined();
+      expect(stream1!.writable).toBe(true);
+      expect(stream2!.writable).toBe(true);
+    } finally {
+      state = stopRecording(state);
+    }
   });
 
   test('should record raw transmission data', () => {
     let state = createMarketRecorderState(config);
+    registerRecorderProcessCleanup(state);
     const marketIds = ['1.123'];
+    try {
+      state = startRecording(state, marketIds);
 
-    state = startRecording(state, marketIds);
+      const rawData = JSON.stringify({
+        op: 'mcm',
+        id: 1,
+        mc: [{ id: '1.123', tv: 1000 }],
+      });
 
-    const rawData = JSON.stringify({
-      op: 'mcm',
-      id: 1,
-      mc: [{ id: '1.123', tv: 1000 }],
-    });
+      // Test that recording raw transmission doesn't throw
+      expect(() => recordRawTransmission(state, rawData)).not.toThrow();
 
-    // Test that recording raw transmission doesn't throw
-    expect(() => recordRawTransmission(state, rawData)).not.toThrow();
-
-    // Verify stream is still writable
-    const stream = state.rawFileStreams.get('1.123');
-    expect(stream).toBeDefined();
-    expect(stream!.writable).toBe(true);
+      // Verify stream is still writable
+      const stream = state.rawFileStreams.get('1.123');
+      expect(stream).toBeDefined();
+      expect(stream!.writable).toBe(true);
+    } finally {
+      state = stopRecording(state);
+    }
   });
 
   test('should update basic market record', () => {
@@ -251,8 +258,9 @@ describe('Market Recorder', () => {
 
   test('should create recording market change callback', () => {
     let state = createMarketRecorderState(config);
+    registerRecorderProcessCleanup(state);
     state = startRecording(state, ['1.123']);
-
+    
     let originalCallbackCalled = false;
     const originalCallback = () => {
       originalCallbackCalled = true;
@@ -262,34 +270,41 @@ describe('Market Recorder', () => {
 
     const marketCache = { '1.123': createMockMarketCache('1.123') };
     const deltas = [JSON.stringify({ op: 'mcm', id: 1, mc: [{ id: '1.123' }] })];
+    try {
+      recordingCallback(marketCache, deltas);
 
-    recordingCallback(marketCache, deltas);
-
-    expect(originalCallbackCalled).toBe(true);
-    expect(state.basicRecords.has('1.123')).toBe(true);
+      expect(originalCallbackCalled).toBe(true);
+      expect(state.basicRecords.has('1.123')).toBe(true);
+    } finally {
+      state = stopRecording(state);
+    }
   });
 
   test('should create raw data callback and record raw data', () => {
     let state = createMarketRecorderState(config);
+    registerRecorderProcessCleanup(state);
     state = startRecording(state, ['1.123']);
-
+    
     const rawDataCallback = createRawDataCallback(state);
     const rawData = JSON.stringify({
       op: 'mcm',
       id: 1,
       mc: [{ id: '1.123', tv: 1000 }],
     });
+    try {
+      // Test that callback doesn't throw
+      expect(() => rawDataCallback(rawData)).not.toThrow();
 
-    // Test that callback doesn't throw
-    expect(() => rawDataCallback(rawData)).not.toThrow();
-
-    // Verify callback is a function
-    expect(typeof rawDataCallback).toBe('function');
-    
-    // Verify stream is still writable after callback
-    const stream = state.rawFileStreams.get('1.123');
-    expect(stream).toBeDefined();
-    expect(stream!.writable).toBe(true);
+      // Verify callback is a function
+      expect(typeof rawDataCallback).toBe('function');
+      
+      // Verify stream is still writable after callback
+      const stream = state.rawFileStreams.get('1.123');
+      expect(stream).toBeDefined();
+      expect(stream!.writable).toBe(true);
+    } finally {
+      state = stopRecording(state);
+    }
   });
 
   test('should stop recording and close streams', () => {
@@ -314,51 +329,65 @@ describe('Market Recorder', () => {
 
   test('should get recording status', () => {
     let state = createMarketRecorderState(config);
+    registerRecorderProcessCleanup(state);
     state = startRecording(state, ['1.123']);
-
+    
     const marketCache = createMockMarketCache('1.123');
     updateBasicRecord(state, marketCache);
+    try {
+      const status = getRecordingStatus(state, '1.123');
 
-    const status = getRecordingStatus(state, '1.123');
-
-    expect(status.isRecording).toBe(true);
-    expect(status.hasRawStream).toBe(true);
-    expect(status.hasBasicRecord).toBe(true);
-    expect(status.rawFilePath).toBe(path.join(TEST_OUTPUT_DIR, 'raw_1.123.txt'));
-    expect(status.basicFilePath).toBe(path.join(TEST_OUTPUT_DIR, 'basic_1.123.json'));
+      expect(status.isRecording).toBe(true);
+      expect(status.hasRawStream).toBe(true);
+      expect(status.hasBasicRecord).toBe(true);
+      expect(status.rawFilePath).toBe(path.join(TEST_OUTPUT_DIR, 'raw_1.123.txt'));
+      expect(status.basicFilePath).toBe(path.join(TEST_OUTPUT_DIR, 'basic_1.123.json'));
+    } finally {
+      state = stopRecording(state);
+    }
   });
 
   test('should create basic record in memory', () => {
     let state = createMarketRecorderState(config);
+    registerRecorderProcessCleanup(state);
     state = startRecording(state, ['1.123']);
 
     const marketCache = createMockMarketCache('1.123', true);
-    updateBasicRecord(state, marketCache);
+    try {
+      updateBasicRecord(state, marketCache);
 
-    // Verify record exists in memory state
-    expect(state.basicRecords.has('1.123')).toBe(true);
-    const record = state.basicRecords.get('1.123')!;
-    expect(record.marketId).toBe('1.123');
-    expect(record.complete).toBe(true);
+      // Verify record exists in memory state
+      expect(state.basicRecords.has('1.123')).toBe(true);
+      const record = state.basicRecords.get('1.123')!;
+      expect(record.marketId).toBe('1.123');
+      expect(record.complete).toBe(true);
+    } finally {
+      state = stopRecording(state);
+    }
   });
 
   test('should track recorded markets in state', () => {
     let state = createMarketRecorderState(config);
+    registerRecorderProcessCleanup(state);
     state = startRecording(state, ['1.123', '1.456']);
 
     // Create some records
-    updateBasicRecord(state, createMockMarketCache('1.123', true));
-    updateBasicRecord(state, createMockMarketCache('1.456', true));
+    try {
+      updateBasicRecord(state, createMockMarketCache('1.123', true));
+      updateBasicRecord(state, createMockMarketCache('1.456', true));
 
-    recordRawTransmission(state, JSON.stringify({ mc: [{ id: '1.123' }] }));
+      recordRawTransmission(state, JSON.stringify({ mc: [{ id: '1.123' }] }));
 
-    // Verify both basic records exist in memory
-    expect(state.basicRecords.has('1.123')).toBe(true);
-    expect(state.basicRecords.has('1.456')).toBe(true);
-    
-    // Verify raw streams exist for both markets
-    expect(state.rawFileStreams.has('1.123')).toBe(true);
-    expect(state.rawFileStreams.has('1.456')).toBe(true);
+      // Verify both basic records exist in memory
+      expect(state.basicRecords.has('1.123')).toBe(true);
+      expect(state.basicRecords.has('1.456')).toBe(true);
+      
+      // Raw streams should be closed once markets complete
+      expect(state.rawFileStreams.has('1.123')).toBe(false);
+      expect(state.rawFileStreams.has('1.456')).toBe(false);
+    } finally {
+      state = stopRecording(state);
+    }
   });
 
   test('should handle recording with only basic recording enabled', () => {
@@ -368,14 +397,19 @@ describe('Market Recorder', () => {
     };
 
     let state = createMarketRecorderState(configBasicOnly);
-    state = startRecording(state, ['1.123']);
+    registerRecorderProcessCleanup(state);
+    try {
+      state = startRecording(state, ['1.123']);
 
-    expect(state.rawFileStreams.size).toBe(0);
+      expect(state.rawFileStreams.size).toBe(0);
 
-    const marketCache = createMockMarketCache('1.123');
-    updateBasicRecord(state, marketCache);
+      const marketCache = createMockMarketCache('1.123');
+      updateBasicRecord(state, marketCache);
 
-    expect(state.basicRecords.has('1.123')).toBe(true);
+      expect(state.basicRecords.has('1.123')).toBe(true);
+    } finally {
+      state = stopRecording(state);
+    }
   });
 
   test('should handle recording with only raw recording enabled', () => {
@@ -385,13 +419,18 @@ describe('Market Recorder', () => {
     };
 
     let state = createMarketRecorderState(configRawOnly);
-    state = startRecording(state, ['1.123']);
+    registerRecorderProcessCleanup(state);
+    try {
+      state = startRecording(state, ['1.123']);
 
-    expect(state.rawFileStreams.size).toBe(1);
+      expect(state.rawFileStreams.size).toBe(1);
 
-    const marketCache = createMockMarketCache('1.123');
-    updateBasicRecord(state, marketCache);
+      const marketCache = createMockMarketCache('1.123');
+      updateBasicRecord(state, marketCache);
 
-    expect(state.basicRecords.has('1.123')).toBe(false);
+      expect(state.basicRecords.has('1.123')).toBe(false);
+    } finally {
+      state = stopRecording(state);
+    }
   });
 });

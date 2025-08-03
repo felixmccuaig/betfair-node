@@ -136,12 +136,27 @@ export const startRecording = (
       if (!state.rawFileStreams.has(marketId)) {
         const filename = `${state.config.rawFilePrefix || ''}${marketId}.txt`;
         const filepath = path.join(state.config.outputDirectory, filename);
+
+        // Ensure the output directory still exists before creating the stream
+        // This guards against cases where the directory may have been removed between state creation and startRecording
+        const dir = state.config.outputDirectory;
+        if (!fs.existsSync(dir)) {
+          fs.mkdirSync(dir, { recursive: true });
+        }
+
         const writeStream = fs.createWriteStream(filepath, { flags: 'a' });
+
+        // Handle asynchronous stream errors gracefully to avoid unhandled errors during tests/cleanup
+        writeStream.on('error', (err) => {
+          console.error(`Raw recording stream error for market ${marketId} at ${filepath}:`, err);
+        });
         
         // Write header
-        writeStream.write(`# Raw market data for market: ${marketId}\n`);
-        writeStream.write(`# Started at: ${new Date().toISOString()}\n`);
-        writeStream.write(`# Format: Each line contains raw JSON transmission from Betfair Exchange Stream API\n\n`);
+        if (writeStream.writable) {
+          writeStream.write(`# Raw market data for market: ${marketId}\n`);
+          writeStream.write(`# Started at: ${new Date().toISOString()}\n`);
+          writeStream.write(`# Format: Each line contains raw JSON transmission from Betfair Exchange Stream API\n\n`);
+        }
         
         updatedState.rawFileStreams.set(marketId, writeStream);
       }
@@ -151,22 +166,44 @@ export const startRecording = (
   return updatedState;
 };
 
+// Register a process-level cleanup to close any open write streams before exit.
+// This is opt-in to avoid global side-effects unless explicitly enabled.
+export const registerRecorderProcessCleanup = (state: MarketRecorderState): void => {
+  const cleanup = () => {
+    try {
+      state.rawFileStreams.forEach((stream) => {
+        try {
+          stream.end();
+        } catch {}
+      });
+      state.rawFileStreams.clear();
+    } catch {}
+  };
+
+  // Use beforeExit so pending I/O can flush; guard against multiple registrations
+  let registered = false;
+  const registerOnce = () => {
+    if (registered) return;
+    registered = true;
+    process.once('beforeExit', cleanup);
+    process.once('exit', cleanup);
+  };
+
+  registerOnce();
+};
+
 /**
  * Stops recording and closes all file streams
  */
 export const stopRecording = (state: MarketRecorderState): MarketRecorderState => {
-  // Close all raw file streams
-  state.rawFileStreams.forEach((stream, marketId) => {
-    stream.write(`\n# Recording stopped at: ${new Date().toISOString()}\n`);
-    stream.end();
-  });
-
-  // Save all basic records to files
-  if (state.config.enableBasicRecording) {
-    state.basicRecords.forEach((record, marketId) => {
-      saveBasicRecord(state.config, record);
+  // Close all open raw file streams safely and clear state
+  try {
+    state.rawFileStreams.forEach((stream) => {
+      try {
+        stream.end();
+      } catch {}
     });
-  }
+  } catch {}
 
   return {
     ...state,
@@ -197,20 +234,45 @@ export const recordRawTransmission = (
         const marketId = marketChange.id;
         const stream = state.rawFileStreams.get(marketId);
         if (stream) {
-          stream.write(`${rawData}\n`);
+          try {
+            if (stream.writable) {
+              stream.write(`${rawData}\n`);
+            }
+          } catch (err) {
+            // On error, end and remove the stream to avoid future writes
+            try { stream.end(); } catch {}
+            state.rawFileStreams.delete(marketId);
+            console.error(`Error writing raw transmission for ${marketId}:`, err);
+          }
         }
       });
     } else {
       // For non-market-specific messages (connection, status, etc.), write to all active streams
-      state.rawFileStreams.forEach((stream) => {
-        stream.write(`${rawData}\n`);
+      state.rawFileStreams.forEach((stream, marketId) => {
+        try {
+          if (stream.writable) {
+            stream.write(`${rawData}\n`);
+          }
+        } catch (err) {
+          try { stream.end(); } catch {}
+          state.rawFileStreams.delete(marketId);
+          console.error(`Error broadcasting raw transmission to ${marketId}:`, err);
+        }
       });
     }
   } catch (error) {
     console.error('Error parsing raw transmission for routing:', error);
     // If parsing fails, write to all active streams to ensure no data is lost
-    state.rawFileStreams.forEach((stream) => {
-      stream.write(`${rawData}\n`);
+    state.rawFileStreams.forEach((stream, marketId) => {
+      try {
+        if (stream.writable) {
+          stream.write(`${rawData}\n`);
+        }
+      } catch (err) {
+        try { stream.end(); } catch {}
+        state.rawFileStreams.delete(marketId);
+        console.error(`Error writing fallback raw transmission to ${marketId}:`, err);
+      }
     });
   }
 };
@@ -280,24 +342,33 @@ const reconcileRunnerData = (
   runnerCache: RunnerCache,
   isMarketComplete: boolean
 ): BasicRunnerRecord => {
-  // Only reconcile when market is complete and has trading data
-  if (!isMarketComplete || !runnerCache.trd || runnerCache.trd.length === 0) {
-    return basicRunner;
+  // console.log(`🔍 Reconciling runner ${basicRunner.id}: complete=${isMarketComplete}, tv=${runnerCache.tv}, trd=${runnerCache.trd?.length || 0}`);
+  
+  // Always use the latest TV from stream, regardless of market completion
+  let reconciledRunner = {
+    ...basicRunner,
+    tv: runnerCache.tv || basicRunner.tv, // Use stream TV if available
+  };
+
+  // Only do full reconciliation when market is complete and has trading data
+  if (isMarketComplete && runnerCache.trd && runnerCache.trd.length > 0) {
+    const tradingData = calculateRunnerTradingData(runnerCache);
+    // console.log(`📈 Runner ${basicRunner.id} trading data:`, tradingData);
+
+    reconciledRunner = {
+      ...reconciledRunner,
+      // Update tv with calculated volume instead of Betfair's (often 0)
+      tv: Math.max(tradingData.reconciledVolume, runnerCache.tv || 0),
+      // Add reconciliation data
+      reconciledVolume: tradingData.reconciledVolume,
+      totalTurnover: tradingData.totalTurnover,
+      volumeWeightedPrice: tradingData.volumeWeightedPrice,
+      priceRange: tradingData.priceRange,
+      tradingActivity: tradingData.tradingActivity
+    };
   }
 
-  const tradingData = calculateRunnerTradingData(runnerCache);
-
-  return {
-    ...basicRunner,
-    // Update tv with calculated volume instead of Betfair's (often 0)
-    tv: tradingData.reconciledVolume,
-    // Add reconciliation data
-    reconciledVolume: tradingData.reconciledVolume,
-    totalTurnover: tradingData.totalTurnover,
-    volumeWeightedPrice: tradingData.volumeWeightedPrice,
-    priceRange: tradingData.priceRange,
-    tradingActivity: tradingData.tradingActivity
-  };
+  return reconciledRunner;
 };
 
 /**
@@ -424,136 +495,111 @@ export const updateBasicRecord = (
     return;
   }
 
-  const marketId = marketCache.marketId;
-  const marketDef = marketCache.marketDefinition;
+  try {
+    const marketDef = marketCache.marketDefinition as MarketDefinition;
+    const marketId = marketCache.marketId;
 
-  // Create or update basic record
-  const existingRecord = state.basicRecords.get(marketId);
-  
-  // Create basic runner records first (without reconciliation)
-  const runners: BasicRunnerRecord[] = Object.values(marketCache.runners).map(runner => {
-    // Try to find runner name from market definition
-    const runnerDef = marketDef.runners.find(r => r.id === runner.id);
-    const runnerName = runnerDef ? getRunnerName(runnerDef) : `Runner ${runner.id}`;
+    // Create or update basic record
+    const existing = state.basicRecords.get(marketId);
+    const preCompleteCheck = isMarketTrulyComplete(marketDef, []);
 
-    return {
-      id: runner.id,
-      name: runnerName,
-      status: runner.status,
-      adjustmentFactor: runner.adjustmentFactor,
-      lastPriceTraded: runner.lastPriceTraded,
-      totalMatched: runner.totalMatched,
-      bsp: runnerDef?.bsp,
-      ltp: runner.ltp,
-      tv: runner.tv, // Will be updated by reconciliation if market complete
-      spn: runner.spn,
-      spf: runner.spf,
-      finalStatus: runner.status,
-      isWinner: runner.status === StreamRunnerStatus.WINNER,
-    };
-  });
+    // Build/merge record
+    const runners: BasicRunnerRecord[] = Object.values(marketCache.runners).map(runner => {
+      // Try to find runner name from market definition
+      const runnerDef = marketDef.runners.find(r => r.id === runner.id);
+      const runnerName = runnerDef ? getRunnerName(runnerDef) : `Runner ${runner.id}`;
 
-  // NOW determine if market is truly complete using the actual runners
-  const isComplete = isMarketTrulyComplete(marketDef, runners);
+      return {
+        id: runner.id,
+        name: runnerName,
+        status: runner.status,
+        adjustmentFactor: runner.adjustmentFactor,
+        lastPriceTraded: runner.lastPriceTraded,
+        totalMatched: runner.totalMatched,
+        bsp: runnerDef?.bsp,
+        ltp: runner.ltp,
+        tv: runner.tv, // Will be updated by reconciliation if market complete
+        spn: runner.spn,
+        spf: runner.spf,
+        finalStatus: runner.status,
+        isWinner: runner.status === StreamRunnerStatus.WINNER,
+      };
+    });
 
-  // Apply reconciliation to runners if market is complete
-  const reconciledRunners = runners.map(runner => {
-    const runnerCache = Object.values(marketCache.runners).find(r => r.id === runner.id);
-    return runnerCache ? reconcileRunnerData(runner, runnerCache, isComplete) : runner;
-  });
+    // NOW determine if market is truly complete using the actual runners
+    const isComplete = isMarketTrulyComplete(marketDef, runners);
 
-  // Calculate market-level reconciliation data
-  let reconciliationData: Partial<BasicMarketRecord> = {};
-  if (isComplete) {
-    const calculatedTotalTurnover = reconciledRunners.reduce((sum, runner) => 
-      sum + (runner.totalTurnover || 0), 0
-    );
-    
-    const totalUniquePrice = reconciledRunners.reduce((sum, runner) => 
-      sum + (runner.priceRange?.trades || 0), 0
-    );
+    // Apply reconciliation to runners if market is complete
+    const reconciledRunners = runners.map(runner => {
+      const runnerCache = Object.values(marketCache.runners).find(r => r.id === runner.id);
+      return runnerCache ? reconcileRunnerData(runner, runnerCache, isComplete) : runner;
+    });
 
-    const marketDepth = reconciledRunners.reduce((sum, runner) => 
-      sum + (runner.reconciledVolume || runner.tv), 0
-    );
+    // Calculate market-level reconciliation data
+    let reconciliationData: Partial<BasicMarketRecord> = {};
+    if (isComplete) {
+      const calculatedTotalTurnover = reconciledRunners.reduce((sum, runner) => 
+        sum + (runner.totalTurnover || 0), 0
+      );
+      
+      const totalUniquePrice = reconciledRunners.reduce((sum, runner) => 
+        sum + (runner.priceRange?.trades || 0), 0
+      );
 
-    reconciliationData = {
-      reconciled: true,
-      reconciliationTime: new Date().toISOString(),
-      calculatedTotalTurnover,
-      liquidityProfile: {
-        totalUniquePrice,
-        marketDepth
-      }
-    };
-  }
+      const marketDepth = reconciledRunners.reduce((sum, runner) => 
+        sum + (runner.reconciledVolume || runner.tv), 0
+      );
 
-  const basicRecord: BasicMarketRecord = {
-    marketId,
-    marketName: marketDef.name || `Market ${marketId}`,
-    eventName: marketDef.eventName || 'Unknown Event',
-    marketStatus: marketDef.status,
-    marketTime: marketDef.marketTime,
-    openDate: marketDef.openDate,
-    totalMatched: marketDef.totalMatched,
-    inPlay: marketDef.inPlay,
-    bspReconciled: marketDef.bspReconciled,
-    complete: isComplete, // Use our corrected logic
-    numberOfWinners: marketDef.numberOfWinners,
-    runners: reconciledRunners, // Use reconciled runners
-    recordedAt: new Date().toISOString(),
-    finalTotalMatched: isComplete ? marketDef.totalMatched : undefined,
-    winners: reconciledRunners.filter(r => r.isWinner).map(r => r.id),
-    ...reconciliationData // Add reconciliation data if market complete
-  };
-
-  state.basicRecords.set(marketId, basicRecord);
-  
-  // If market is complete, enrich and save the record
-  if (isComplete) {
-    // Handle enrichment asynchronously
-    const processCompletedMarket = async () => {
-      try {
-        // Enrich the record if enabled
-        const enrichedRecord = await enrichMarketData(state, marketId, basicRecord);
-        
-        // Save the enriched record
-        saveBasicRecord(state.config, enrichedRecord);
-        
-        // Update the stored record with enriched data
-        state.basicRecords.set(marketId, enrichedRecord);
-        
-        // Mark market as completed
-        if (!state.completedMarkets.has(marketId)) {
-          state.completedMarkets.add(marketId);
-          
-          // Log completion with reconciliation info
-          const totalTurnover = enrichedRecord.calculatedTotalTurnover;
-          const marketDepth = enrichedRecord.liquidityProfile?.marketDepth;
-          const reconciliationMsg = totalTurnover && marketDepth 
-            ? ` (reconciled: £${totalTurnover.toFixed(2)} turnover, ${marketDepth.toFixed(0)} volume)`
-            : '';
-          
-          console.log(`🏁 Market "${enrichedRecord.marketName}" completed and recorded${reconciliationMsg}`);
-          
-          // Check if all finite markets are complete
-          checkAllMarketsComplete(state);
+      reconciliationData = {
+        reconciled: true,
+        reconciliationTime: new Date().toISOString(),
+        calculatedTotalTurnover,
+        liquidityProfile: {
+          totalUniquePrice,
+          marketDepth
         }
-      } catch (error) {
-        console.error(`❌ Error processing completed market ${marketId}:`, error);
-        
-        // Fallback: save without enrichment
-        saveBasicRecord(state.config, basicRecord);
-        
-        if (!state.completedMarkets.has(marketId)) {
-          state.completedMarkets.add(marketId);
-          checkAllMarketsComplete(state);
-        }
-      }
+      };
+    }
+
+    const basicRecord: BasicMarketRecord = {
+      marketId,
+      marketName: marketDef.name || `Market ${marketId}`,
+      eventName: marketDef.eventName || 'Unknown Event',
+      marketStatus: marketDef.status,
+      marketTime: marketDef.marketTime,
+      openDate: marketDef.openDate,
+      totalMatched: marketDef.totalMatched,
+      inPlay: marketDef.inPlay,
+      bspReconciled: marketDef.bspReconciled,
+      complete: isComplete, // Use our corrected logic
+      numberOfWinners: marketDef.numberOfWinners,
+      runners: reconciledRunners, // Use reconciled runners
+      recordedAt: new Date().toISOString(),
+      finalTotalMatched: isComplete ? marketDef.totalMatched : undefined,
+      winners: reconciledRunners.filter(r => r.isWinner).map(r => r.id),
+      ...reconciliationData // Add reconciliation data if market complete
     };
-    
-    // Execute async processing
-    processCompletedMarket();
+
+    // Save to memory
+    state.basicRecords.set(marketId, basicRecord);
+
+    // If the market is complete, persist and close its raw stream
+    if (basicRecord.complete) {
+      saveBasicRecord(state.config, basicRecord);
+
+      // Close raw stream for this market to prevent leaks in long-running sessions
+      const rawStream = state.rawFileStreams.get(marketId);
+      if (rawStream) {
+        try { rawStream.end(); } catch {}
+        state.rawFileStreams.delete(marketId);
+      }
+
+      // Track completion and possibly stop all if finite mode
+      state.completedMarkets.add(marketId);
+      checkAllMarketsComplete(state);
+    }
+  } catch (error) {
+    console.error('Error updating basic record:', error);
   }
 };
 
@@ -773,4 +819,9 @@ export const listRecordedMarkets = (config: MarketRecordingConfig): {
     console.error('Error listing recorded markets:', error);
     return { basicRecords: [], rawRecords: [] };
   }
+};
+
+export const shutdownRecorder = (state: MarketRecorderState): MarketRecorderState => {
+  // Public helper for production apps to stop recording deterministically
+  return stopRecording(state);
 };

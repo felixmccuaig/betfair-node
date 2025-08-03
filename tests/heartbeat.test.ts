@@ -46,20 +46,26 @@ describe('Heartbeat Functions', () => {
 
   describe('startHeartbeat', () => {
     it('should start heartbeat and set timeout', () => {
-      const updatedState = startHeartbeat(initialState);
-      
-      expect(updatedState.isBeating).toBe(true);
-      expect(updatedState.timeout).toBeDefined();
+      let state = initialState;
+      try {
+        state = startHeartbeat(state);
+        expect(state.isBeating).toBe(true);
+        expect(state.timeout).toBeDefined();
+      } finally {
+        state = stopHeartbeat(state);
+      }
     });
 
     it('should not restart if already beating', () => {
-      const beatingState = startHeartbeat(initialState);
-      const originalTimeout = beatingState.timeout;
-      
-      const notRestartedState = startHeartbeat(beatingState);
-      
-      expect(notRestartedState.timeout).toBe(originalTimeout);
-      expect(notRestartedState.isBeating).toBe(true);
+      let state = startHeartbeat(initialState);
+      const originalTimeout = state.timeout;
+      try {
+        const notRestartedState = startHeartbeat(state);
+        expect(notRestartedState.timeout).toBe(originalTimeout);
+        expect(notRestartedState.isBeating).toBe(true);
+      } finally {
+        state = stopHeartbeat(state);
+      }
     });
 
     it('should call onHeartAttack after timeout period', (done) => {
@@ -77,8 +83,8 @@ describe('Heartbeat Functions', () => {
 
     it('should add 2 second buffer to timeout', () => {
       jest.useFakeTimers();
-      const state = createHeartbeatState(1000, mockOnHeartAttack);
-      startHeartbeat(state);
+      let state = createHeartbeatState(1000, mockOnHeartAttack);
+      state = startHeartbeat(state);
       
       // Advance timer by 1000ms (heartbeat interval)
       jest.advanceTimersByTime(1000);
@@ -89,6 +95,7 @@ describe('Heartbeat Functions', () => {
       expect(mockOnHeartAttack).toHaveBeenCalledTimes(1);
       
       jest.useRealTimers();
+      state = stopHeartbeat(state);
     });
   });
 
@@ -123,10 +130,13 @@ describe('Heartbeat Functions', () => {
 
   describe('refreshHeartbeat', () => {
     it('should refresh active heartbeat', () => {
-      const beatingState = startHeartbeat(initialState);
-      const refreshedState = refreshHeartbeat(beatingState);
-      
-      expect(refreshedState.isBeating).toBe(true);
+      let state = startHeartbeat(initialState);
+      try {
+        state = refreshHeartbeat(state);
+        expect(state.isBeating).toBe(true);
+      } finally {
+        state = stopHeartbeat(state);
+      }
     });
 
     it('should not change state when heartbeat is not active', () => {
@@ -163,11 +173,15 @@ describe('Heartbeat Functions', () => {
     });
 
     it('should restart heartbeat with new interval when active', () => {
-      const beatingState = startHeartbeat(initialState);
-      const updatedState = updateHeartbeatInterval(beatingState, 3000);
-      
-      expect(updatedState.heartbeatMs).toBe(3000);
-      expect(updatedState.isBeating).toBe(true);
+      let state = startHeartbeat(initialState);
+      try {
+        state = updateHeartbeatInterval(state, 3000);
+        
+        expect(state.heartbeatMs).toBe(3000);
+        expect(state.isBeating).toBe(true);
+      } finally {
+        state = stopHeartbeat(state);
+      }
     });
 
     it('should use new interval for timeout calculation', () => {
@@ -196,14 +210,18 @@ describe('Heartbeat Functions', () => {
     });
 
     it('should return true for active heartbeat', () => {
-      const beatingState = startHeartbeat(initialState);
-      expect(isHeartbeatActive(beatingState)).toBe(true);
+      let state = startHeartbeat(initialState);
+      try {
+        expect(isHeartbeatActive(state)).toBe(true);
+      } finally {
+        state = stopHeartbeat(state);
+      }
     });
 
     it('should return false after stopping', () => {
-      const beatingState = startHeartbeat(initialState);
-      const stoppedState = stopHeartbeat(beatingState);
-      expect(isHeartbeatActive(stoppedState)).toBe(false);
+      let state = startHeartbeat(initialState);
+      state = stopHeartbeat(state);
+      expect(isHeartbeatActive(state)).toBe(false);
     });
   });
 
@@ -221,23 +239,24 @@ describe('Heartbeat Functions', () => {
   describe('Integration tests', () => {
     it('should handle complete lifecycle', () => {
       let state = initialState;
-      
-      // Start heartbeat
-      state = startHeartbeat(state);
-      expect(isHeartbeatActive(state)).toBe(true);
-      
-      // Refresh heartbeat
-      state = refreshHeartbeat(state);
-      expect(isHeartbeatActive(state)).toBe(true);
-      
-      // Update interval
-      state = updateHeartbeatInterval(state, 2000);
-      expect(getHeartbeatInterval(state)).toBe(2000);
-      expect(isHeartbeatActive(state)).toBe(true);
-      
-      // Stop heartbeat
-      state = stopHeartbeat(state);
-      expect(isHeartbeatActive(state)).toBe(false);
+      try {
+        // Start heartbeat
+        state = startHeartbeat(state);
+        expect(isHeartbeatActive(state)).toBe(true);
+        
+        // Refresh heartbeat
+        state = refreshHeartbeat(state);
+        expect(isHeartbeatActive(state)).toBe(true);
+        
+        // Update interval
+        state = updateHeartbeatInterval(state, 2000);
+        expect(getHeartbeatInterval(state)).toBe(2000);
+        expect(isHeartbeatActive(state)).toBe(true);
+      } finally {
+        // Stop heartbeat
+        state = stopHeartbeat(state);
+        expect(isHeartbeatActive(state)).toBe(false);
+      }
     });
 
     it('should handle multiple start/stop cycles', () => {
