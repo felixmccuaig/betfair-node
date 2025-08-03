@@ -16,7 +16,9 @@ A comprehensive Node.js TypeScript library for the Betfair Exchange API, providi
 
 ### 📡 **Real-time Exchange Stream API**
 - **Live Market Data**: Subscribe to real-time market updates with low latency
-- **Stream Decoding**: Automatic deserialization and caching of market deltas
+- **Order Stream**: Real-time order updates, unmatched orders, and matched positions
+- **Message Segmentation**: Automatic handling of segmented messages for optimal performance
+- **Stream Decoding**: Automatic deserialization and caching of market/order deltas
 - **Connection Management**: Robust connection handling with automatic reconnection
 - **Heartbeat Monitoring**: Built-in connection health monitoring
 
@@ -341,6 +343,67 @@ async function recordMarketData() {
 - `resubscribeToMarkets(state, marketIds, fields?)` - Update subscription
 - `unsubscribeFromMarkets(state, marketIds?)` - Unsubscribe from markets
 
+#### Order Stream Subscriptions
+- `subscribeToOrders(state, orderFilter?)` - Subscribe to order updates with optional filtering
+- `getOrderStreamCache(state)` - Get current order cache from stream
+
+### Message Segmentation
+
+Betfair's Exchange Stream API supports **message segmentation** to handle large data payloads efficiently. When enabled, large messages are broken into smaller segments that are automatically reassembled by the library.
+
+#### How Segmentation Works
+
+When `segmentationEnabled: true` is set:
+
+1. **Large messages are segmented** into multiple parts:
+   - `SEG_START` - First segment of a message
+   - Middle segments (no segmentationType) - Additional data segments  
+   - `SEG_END` - Final segment containing remaining data
+
+2. **Automatic reassembly** - The library automatically:
+   - Buffers segments until complete message received
+   - Merges all market/order changes from all segments
+   - Processes the complete message only after reassembly
+   - Maintains separate buffers for market and order messages
+
+3. **Performance benefits**:
+   - Improved end-to-end performance and latency
+   - Faster time to first and last byte
+   - Reduced memory pressure for large messages
+
+#### Usage Example
+
+```typescript
+// Enable segmentation for better performance with large messages
+const streamState = await createAndConnectStream(
+  authToken,
+  appKey,
+  true,    // segmentationEnabled - IMPORTANT for order streams
+  500,     // conflateMs
+  5000,    // heartbeatMs
+  currencyRate,
+  marketChangeCallback,
+  orderChangeCallback  // Order callback for order stream functionality
+);
+
+// Subscribe to order updates (requires segmentation for full functionality)
+const orderFilter = {
+  includeOverallPosition: true,  // Include all position data
+  customerStrategyRefs: ['MyStrategy'], // Optional: filter by strategy
+  partitionMatchedByStrategyRef: false  // Optional: partition data
+};
+
+const updatedState = subscribeToOrders(streamState, orderFilter);
+```
+
+#### Important Notes
+
+- **Order streams require segmentation enabled** for full functionality
+- Segmentation is automatically handled - no manual intervention needed
+- Non-segmented messages are processed immediately
+- Segment buffers are automatically cleaned up after processing
+- Multiple concurrent segmented message streams are supported
+
 ### Utility Functions
 
 #### General Utilities
@@ -365,6 +428,13 @@ Lists Australian greyhound racing markets with detailed information including ve
 
 ### 💰 Place Bet (`npm run example:bet`)  
 Demonstrates placing a real back bet with validation, error handling, and success reporting.
+
+### 📋 Order Stream (`npm run example:orders`)
+Real-time order stream monitoring showing your live betting positions and order updates. Features:
+- **Complete Order View**: Shows all current orders via JSON-RPC API for comparison
+- **Real-time Updates**: Live order status changes, matches, and position updates  
+- **Segmentation Support**: Demonstrates proper message segmentation handling
+- **Strategy Filtering**: Examples of filtering orders by customer strategy references
 
 ### 📺 Live Trading View (`npm run example:live`)
 Professional real-time trading interface showing live price ladders, similar to trading software. Features:

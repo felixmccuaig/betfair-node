@@ -3,6 +3,11 @@ export type MarketChangeCallback = (
   deltas: string[]
 ) => void;
 
+export type OrderChangeCallback = (
+  orderCache: { [key: string]: OrderAccountCache },
+  deltas: string[]
+) => void;
+
 export type RawDataCallback = (rawData: string) => void;
 
 export type Message = {
@@ -45,7 +50,7 @@ export type ChangeMessage = SubscriptionMessage & {
   status: number;
   pt: number;
   con: boolean;
-  segmentationType: string;
+  segmentationType?: string; // Optional - undefined for non-segmented and middle segments
 };
 
 export type StreamMarketFilter = {
@@ -177,6 +182,91 @@ export type MarketSubscriptionMessage = Message & {
   heartbeatMs: number;
 };
 
+// Order Subscription Types
+export type OrderFilter = {
+  accountIds?: number[];
+  includeOverallPosition?: boolean;
+  customerStrategyRefs?: string[];
+  partitionMatchedByStrategyRef?: boolean;
+};
+
+export type OrderSubscriptionMessage = Message & {
+  orderFilter?: OrderFilter;
+  segmentationEnabled: boolean;
+  conflateMs?: number;
+  heartbeatMs?: number;
+};
+
+// Order Change Message Types
+export type OrderChangeMessage = ChangeMessage & {
+  oc?: OrderAccountChange[];
+};
+
+export type OrderAccountChange = {
+  closed?: boolean;
+  id: string; // Market ID
+  fullImage?: boolean;
+  orc?: OrderRunnerChange[];
+};
+
+export type OrderRunnerChange = {
+  fullImage?: boolean;
+  id: number; // Selection ID
+  hc?: number; // Handicap
+  uo?: UnmatchedOrder[]; // Unmatched Orders
+  mb?: [number, number][]; // Matched Backs [price, size]
+  ml?: [number, number][]; // Matched Lays [price, size]
+  smc?: { [key: string]: StrategyMatchChange }; // Strategy Match Changes
+};
+
+export type UnmatchedOrder = {
+  id: string; // Bet ID
+  p: number; // Price
+  s: number; // Size
+  bsp?: number; // BSP Liability
+  side: OrderSide;
+  status: StreamOrderStatus;
+  pt: StreamPersistenceType;
+  ot: StreamOrderType;
+  pd: number; // Placed Date
+  md?: number; // Matched Date
+  cd?: number; // Cancelled Date
+  ld?: number; // Lapsed Date
+  lsrc?: string; // Lapse Status Reason Code
+  avp?: number; // Average Price Matched
+  sm: number; // Size Matched
+  sr: number; // Size Remaining
+  sl: number; // Size Lapsed
+  sc: number; // Size Cancelled
+  sv: number; // Size Voided
+  rac?: string; // Regulator Auth Code
+  rc?: string; // Regulator Code
+  rfo?: string; // Reference Order
+  rfs?: string; // Reference Strategy
+};
+
+export type StrategyMatchChange = {
+  mb?: [number, number][]; // Matched Backs [price, size]
+  ml?: [number, number][]; // Matched Lays [price, size]
+};
+
+// Order Cache Types
+export type OrderAccountCache = {
+  marketId: string;
+  closed: boolean;
+  runners: { [key: string]: OrderRunnerCache };
+  published: number;
+};
+
+export type OrderRunnerCache = {
+  id: number;
+  hc?: number;
+  unmatchedOrders: { [key: string]: UnmatchedOrder };
+  matchedBacks: [number, number][]; // [price, size]
+  matchedLays: [number, number][]; // [price, size]
+  strategyMatches: { [key: string]: StrategyMatchChange };
+};
+
 export enum StatusCode {
   SUCCESS = 'SUCCESS',
   FAILURE = 'FAILURE',
@@ -186,6 +276,12 @@ export enum ChangeType {
   SUB_IMAGE = 'SUB_IMAGE',
   RESUB_DELTA = 'RESUB_DELTA',
   HEARTBEAT = 'HEARTBEAT',
+}
+
+export enum SegmentType {
+  SEG_START = 'SEG_START',
+  SEG_END = 'SEG_END',
+  // null or undefined = not segmented or middle segment
 }
 
 export enum BettingType {
@@ -211,4 +307,27 @@ export enum StreamRunnerStatus {
   REMOVED_VACANT = 'REMOVED_VACANT',
   REMOVED = 'REMOVED',
   HIDDEN = 'HIDDEN',
+}
+
+// Order-related enums (Stream API specific - uses abbreviated codes)
+export enum OrderSide {
+  BACK = 'B',
+  LAY = 'L',
+}
+
+export enum StreamOrderStatus {
+  EXECUTABLE = 'E',
+  EXECUTION_COMPLETE = 'EC',
+}
+
+export enum StreamPersistenceType {
+  LAPSE = 'L',
+  PERSIST = 'P',
+  MARKET_ON_CLOSE = 'MOC',
+}
+
+export enum StreamOrderType {
+  LIMIT = 'L',
+  MARKET_ON_CLOSE = 'MOC',
+  LIMIT_ON_CLOSE = 'LOC',
 }

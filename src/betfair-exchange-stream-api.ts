@@ -4,12 +4,15 @@ import { createInterface, Interface } from 'readline';
 
 import {
   MarketSubscriptionMessage,
+  OrderSubscriptionMessage,
   AuthenticationMessage,
   StatusMessage,
   ConnectionMessage,
   CurrencyRate,
   MarketChangeCallback,
+  OrderChangeCallback,
   RawDataCallback,
+  OrderFilter,
 } from './betfair-exchange-stream-api-types';
 
 import {
@@ -18,8 +21,10 @@ import {
   createStreamDecoderState,
   processDataPacket,
   getMarketCache,
+  getOrderCache,
   resetStreamDecoder,
   updateSubscribedMarkets,
+  clearOrderCache,
 } from './betfair-stream-decoder';
 
 import {
@@ -51,8 +56,10 @@ export interface StreamApiState {
   heartbeatMs: number;
   audCurrencyRate: CurrencyRate;
   lastMarketSubscription?: MarketSubscriptionMessage;
+  lastOrderSubscription?: OrderSubscriptionMessage;
   lastMarkets: string[];
   marketChangeCallback: MarketChangeCallback;
+  orderChangeCallback?: OrderChangeCallback;
   rawDataCallback?: RawDataCallback;
 }
 
@@ -67,6 +74,7 @@ export const createStreamApiState = (
   heartbeatMs: number,
   audCurrencyRate: CurrencyRate,
   marketChangeCallback: MarketChangeCallback,
+  orderChangeCallback?: OrderChangeCallback,
   rawDataCallback?: RawDataCallback
 ): StreamApiState => {
   const onHeartAttack = () => {
@@ -88,6 +96,7 @@ export const createStreamApiState = (
     audCurrencyRate,
     lastMarkets: [],
     marketChangeCallback,
+    orderChangeCallback,
     rawDataCallback,
   };
 };
@@ -119,6 +128,7 @@ export const openStream = (state: StreamApiState): Promise<StreamApiState> => {
 
       const streamDecoderCallbacks: StreamDecoderCallbacks = {
         onMarketChange: state.marketChangeCallback,
+        onOrderChange: state.orderChangeCallback,
         onStatus: (statusMessage: StatusMessage) => handleStatusMessage(state, statusMessage),
         onConnection: (connectionMessage: ConnectionMessage) => handleConnectionMessage(state, connectionMessage),
         onHeartbeat: () => handleHeartbeat(state),
@@ -275,10 +285,66 @@ export const subscribeToMarkets = (
 };
 
 /**
+ * Subscribes to order updates
+ */
+export const subscribeToOrders = (
+  state: StreamApiState,
+  orderFilter?: OrderFilter
+): StreamApiState => {
+  if (!state.tlsSocket || !state.authenticationStatus) {
+    throw new Error('Stream not connected or authenticated');
+  }
+
+  // Clear order cache
+  let updatedStreamDecoder = clearOrderCache(state.streamDecoder);
+
+  const message: OrderSubscriptionMessage = {
+    id: generatePacketId(),
+    op: 'orderSubscription',
+    orderFilter,
+    segmentationEnabled: state.segmentationEnabled,
+    conflateMs: state.conflateMs,
+    heartbeatMs: state.heartbeatMs,
+  };
+
+  const payload = JSON.stringify(message);
+  console.log(`🔧 Order subscription payload: ${payload}`);
+  console.log('📋 Order subscription details:', {
+    operation: message.op,
+    hasFilter: !!orderFilter,
+    filterDetails: orderFilter,
+    segmentation: message.segmentationEnabled,
+    conflate: message.conflateMs,
+    heartbeat: message.heartbeatMs
+  });
+
+  const updatedPendingPackets = {
+    ...state.pendingPackets,
+    [message.id]: 'AWAITING',
+  };
+
+  state.tlsSocket.write(`${payload}\r\n`);
+
+  return {
+    ...state,
+    streamDecoder: updatedStreamDecoder,
+    lastOrderSubscription: message,
+    pendingPackets: updatedPendingPackets,
+  };
+};
+
+/**
  * Gets the current market cache
  */
 export const getStreamCache = (state: StreamApiState): { [key: string]: any } => {
   return getMarketCache(state.streamDecoder);
+};
+
+/**
+ * Gets the current order cache
+ */
+export const getOrderStreamCache = (state: StreamApiState): { [key: string]: any } => {
+  return getOrderCache(state.streamDecoder);
 };
 
 /**
@@ -339,6 +405,7 @@ export const createAndConnectStream = async (
   heartbeatMs: number,
   audCurrencyRate: CurrencyRate,
   marketChangeCallback: MarketChangeCallback,
+  orderChangeCallback?: OrderChangeCallback,
   rawDataCallback?: RawDataCallback
 ): Promise<StreamApiState> => {
   let state = createStreamApiState(
@@ -349,6 +416,7 @@ export const createAndConnectStream = async (
     heartbeatMs,
     audCurrencyRate,
     marketChangeCallback,
+    orderChangeCallback,
     rawDataCallback
   );
 
@@ -368,6 +436,7 @@ export const createAndConnectRecordingStream = async (
   conflateMs: number,
   audCurrencyRate: CurrencyRate,
   marketChangeCallback: MarketChangeCallback,
+  orderChangeCallback?: OrderChangeCallback,
   rawDataCallback?: RawDataCallback
 ): Promise<StreamApiState> => {
   // Use a longer heartbeat for recording (30 seconds instead of 5)
@@ -381,6 +450,7 @@ export const createAndConnectRecordingStream = async (
     recordingHeartbeatMs,
     audCurrencyRate,
     marketChangeCallback,
+    orderChangeCallback,
     rawDataCallback
   );
 };
