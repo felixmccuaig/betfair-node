@@ -29,6 +29,7 @@
     "example:backtest": "ts-node examples/simple-backtest.ts",
     "example:backtest-verbose": "ts-node examples/historical-data-backtest.ts",
     "example:orders": "ts-node examples/order-stream-example.ts",
+    "example:results": "ts-node examples/comprehensive-market-results.ts --",
     "prepack": "npm run build",
     "clean": "rimraf dist coverage"
   },

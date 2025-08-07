@@ -465,3 +465,96 @@ export enum InstructionReportErrorCode {
   INVALID_MIN_FILL_SIZE = 'INVALID_MIN_FILL_SIZE',
   BET_LAPSED_PRICE_IMPROVEMENT_TOO_LARGE = 'BET_LAPSED_PRICE_IMPROVEMENT_TOO_LARGE',
 }
+
+export type ComprehensiveMarketResults = {
+  marketId: string;
+  venue: string;
+  eventName: string;
+  marketTime: string;
+  result: { [selectionId: number]: { status: 'WINNER' | 'LOSER' | 'REMOVED' | 'VOID'; adjustmentFactor?: number } };
+  bsp: { [selectionId: number]: number };
+  runners: { [selectionId: number]: { name: string; totalMatched: number } };
+  settledTime?: string;
+  marketStatus: MarketStatus;
+  totalMatched: number;
+};
+
+export type MarketBook = {
+  marketId: string;
+  isMarketDataDelayed: boolean;
+  status: MarketStatus;
+  betDelay: number;
+  bspReconciled: boolean;
+  complete: boolean;
+  inplay: boolean;
+  numberOfWinners: number;
+  numberOfRunners: number;
+  numberOfActiveRunners: number;
+  lastMatchTime: string;
+  totalMatched: number;
+  totalAvailable: number;
+  crossMatching: boolean;
+  runnersVoidable: boolean;
+  version: number;
+  runners: RunnerBook[];
+  keyLineDescription: KeyLineDescription;
+};
+
+export type RunnerBook = {
+  selectionId: number;
+  handicap: number;
+  status: RunnerStatus;
+  adjustmentFactor: number;
+  lastPriceTraded: number;
+  totalMatched: number;
+  removalDate: string;
+  ex: ExchangePrices;
+  sp: StartingPrices;
+  orders: Order[];
+  matches: Match[];
+};
+
+export type ExchangePrices = {
+  availableToBack: PriceSize[];
+  availableToLay: PriceSize[];
+  tradedVolume: PriceSize[];
+};
+
+export type StartingPrices = {
+  nearPrice: number;
+  farPrice: number;
+  backStakeTaken: PriceSize[];
+  layLiabilityTaken: PriceSize[];
+  actualSP: number;
+};
+
+export type KeyLineDescription = {
+  keyLine: PriceSize[];
+};
+
+export type Order = {
+  betId: string;
+  orderType: OrderType;
+  status: OrderStatus;
+  persistenceType: PersistenceType;
+  side: Side;
+  price: number;
+  size: number;
+  bspLiability: number;
+  placedDate: string;
+  avgPriceMatched: number;
+  sizeMatched: number;
+  sizeRemaining: number;
+  sizeLapsed: number;
+  sizeCancelled: number;
+  sizeVoided: number;
+};
+
+export type Match = {
+  betId: string;
+  matchId: string;
+  side: Side;
+  price: number;
+  size: number;
+  matchDate: string;
+};

@@ -25,6 +25,7 @@ import {
   calculateBackProfit,
   calculateLayLiability,
   validateOrderParameters,
+  getComprehensiveMarketResults,
   BetfairApiState,
 } from '../src/betfair-api';
 
@@ -42,6 +43,8 @@ import {
   CancelInstruction,
   ReplaceInstruction,
   UpdateInstruction,
+  ComprehensiveMarketResults,
+  MarketProjection,
 } from '../src/betfair-api-types';
 
 import { CurrencyRate, MarketCache } from '../src/betfair-exchange-stream-api-types';
@@ -790,6 +793,103 @@ describe('Betfair API Functional Implementation', () => {
         const result = validateOrderParameters('invalid', -1, 0.5, 0.005);
         expect(result.isValid).toBe(false);
         expect(result.errors).toHaveLength(4);
+      });
+    });
+
+    describe('getComprehensiveMarketResults', () => {
+      let authenticatedState: BetfairApiState;
+
+      beforeEach(() => {
+        authenticatedState = {
+          ...apiState,
+          sessionKey: 'test-session',
+          appKey: 'test-app-key',
+        };
+      });
+
+      it('should fetch comprehensive market results', async () => {
+        const mockMarketBookResponse = {
+          status: 200,
+          data: {
+            result: [{
+              marketId: '1.123456',
+              status: 'CLOSED',
+              totalMatched: 50000,
+              runners: [{
+                selectionId: 123,
+                status: 'WINNER',
+                adjustmentFactor: 1.0,
+                totalMatched: 25000,
+                sp: { actualSP: 2.5 }
+              }, {
+                selectionId: 456,
+                status: 'LOSER',
+                adjustmentFactor: 1.0,
+                totalMatched: 15000,
+                sp: { actualSP: 3.2 }
+              }]
+            }]
+          }
+        };
+
+        const mockMarketCatalogueResponse = {
+          status: 200,
+          data: {
+            result: [{
+              marketId: '1.123456',
+              marketName: 'Test Race',
+              marketStartTime: '2024-01-01T14:00:00Z',
+              event: {
+                name: 'Test Event',
+                venue: 'Test Track'
+              },
+              runners: [{
+                selectionId: 123,
+                runnerName: 'Horse A'
+              }, {
+                selectionId: 456,
+                runnerName: 'Horse B'
+              }]
+            }]
+          }
+        };
+
+        (axios as any)
+          .mockResolvedValueOnce(mockMarketBookResponse)
+          .mockResolvedValueOnce(mockMarketCatalogueResponse);
+
+        const result = await getComprehensiveMarketResults(authenticatedState, '1.123456');
+
+        expect(result.data.result).toEqual({
+          marketId: '1.123456',
+          venue: 'Test Track',
+          eventName: 'Test Event',
+          marketTime: '2024-01-01T14:00:00Z',
+          result: {
+            123: { status: 'WINNER' },
+            456: { status: 'LOSER' }
+          },
+          bsp: {
+            123: 2.5,
+            456: 3.2
+          },
+          runners: {
+            123: { name: 'Horse A', totalMatched: 25000 },
+            456: { name: 'Horse B', totalMatched: 15000 }
+          },
+          settledTime: undefined,
+          marketStatus: 'CLOSED',
+          totalMatched: 50000
+        });
+
+        expect(axios).toHaveBeenCalledTimes(2);
+      });
+
+      it('should handle missing market data gracefully', async () => {
+        (axios as any).mockResolvedValueOnce({ status: 404, data: { result: [] } });
+
+        await expect(getComprehensiveMarketResults(authenticatedState, '1.123456'))
+          .rejects.toThrow('Failed to fetch market book data');
       });
     });
   });

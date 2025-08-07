@@ -21,6 +21,11 @@ import {
   ReplaceExecutionReport,
   UpdateExecutionReport,
   PersistenceType,
+  ComprehensiveMarketResults,
+  MarketBook,
+  RunnerBook,
+  MarketProjection,
+  PriceData,
 } from './betfair-api-types';
 import { CurrencyRate, MarketChangeCallback } from './betfair-exchange-stream-api-types';
 import { generatePacketId } from './utils';
@@ -837,5 +842,124 @@ export const validateOrderParameters = (
   return {
     isValid: errors.length === 0,
     errors,
+  };
+};
+
+/**
+ * Gets comprehensive market settlement results including runner names and volume data
+ * @param state - Current API state
+ * @param marketId - The market ID to get results for
+ * @returns Promise with comprehensive market results
+ */
+export const getComprehensiveMarketResults = async (
+  state: BetfairApiState,
+  marketId: string
+): Promise<AxiosResponse<{ result: ComprehensiveMarketResults }>> => {
+  const { sessionKey, appKey } = ensureAuthenticated(state);
+
+  // Get market book data for BSP and settlement status
+  const marketBookResponse = await makeBettingApiRequest(
+    'listMarketBook',
+    {
+      marketIds: [marketId],
+      priceProjection: {
+        priceData: [PriceData.SP_AVAILABLE, PriceData.SP_TRADED, PriceData.EX_TRADED],
+      },
+      orderProjection: 'ALL',
+      matchProjection: 'ROLLED_UP_BY_PRICE',
+    },
+    sessionKey,
+    appKey
+  );
+
+  if (marketBookResponse.status !== 200 || !marketBookResponse.data.result?.[0]) {
+    throw new Error('Failed to fetch market book data');
+  }
+
+  const marketBook: MarketBook = marketBookResponse.data.result[0];
+
+  // Get market catalogue data for runner names and event details
+  const marketCatalogueResponse = await makeBettingApiRequest(
+    'listMarketCatalogue',
+    {
+      filter: { marketIds: [marketId] },
+      marketProjection: [
+        MarketProjection.RUNNER_DESCRIPTION,
+        MarketProjection.EVENT,
+        MarketProjection.MARKET_START_TIME,
+        MarketProjection.MARKET_DESCRIPTION,
+      ],
+      maxResults: 1,
+      locale: state.locale,
+    },
+    sessionKey,
+    appKey
+  );
+
+  if (marketCatalogueResponse.status !== 200 || !marketCatalogueResponse.data.result?.[0]) {
+    throw new Error('Failed to fetch market catalogue data');
+  }
+
+  const marketCatalogue = marketCatalogueResponse.data.result[0];
+
+  // Build comprehensive results
+  const result: { [selectionId: number]: { status: 'WINNER' | 'LOSER' | 'REMOVED' | 'VOID'; adjustmentFactor?: number } } = {};
+  const bsp: { [selectionId: number]: number } = {};
+  const runners: { [selectionId: number]: { name: string; totalMatched: number } } = {};
+
+  // Process runners from market book
+  marketBook.runners.forEach((runner: RunnerBook) => {
+    // Map runner status to result status
+    let status: 'WINNER' | 'LOSER' | 'REMOVED' | 'VOID';
+    switch (runner.status) {
+      case 'WINNER':
+        status = 'WINNER';
+        break;
+      case 'LOSER':
+        status = 'LOSER';
+        break;
+      case 'REMOVED_VACANT':
+      case 'REMOVED':
+        status = 'REMOVED';
+        break;
+      case 'HIDDEN':
+        status = 'VOID';
+        break;
+      default:
+        status = 'LOSER'; // Default for active runners in settled markets
+    }
+
+    result[runner.selectionId] = {
+      status,
+      ...(runner.adjustmentFactor !== 1.0 && { adjustmentFactor: runner.adjustmentFactor }),
+    };
+
+    // BSP data
+    bsp[runner.selectionId] = runner.sp?.actualSP || 0;
+
+    // Find runner name from catalogue
+    const catalogueRunner = marketCatalogue.runners?.find((r: any) => r.selectionId === runner.selectionId);
+    runners[runner.selectionId] = {
+      name: catalogueRunner?.runnerName || `Selection ${runner.selectionId}`,
+      totalMatched: runner.totalMatched || 0,
+    };
+  });
+
+  const comprehensiveResults: ComprehensiveMarketResults = {
+    marketId: marketBook.marketId,
+    venue: marketCatalogue.event?.venue || 'Unknown',
+    eventName: marketCatalogue.event?.name || marketCatalogue.marketName || 'Unknown Event',
+    marketTime: marketCatalogue.marketStartTime || marketCatalogue.description?.marketTime || '',
+    result,
+    bsp,
+    runners,
+    settledTime: marketCatalogue.description?.settleTime || undefined,
+    marketStatus: marketBook.status,
+    totalMatched: marketBook.totalMatched || 0,
+  };
+
+  return {
+    ...marketBookResponse,
+    data: { result: comprehensiveResults },
   };
 };
